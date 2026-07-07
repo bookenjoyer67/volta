@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# Volta — ebook reader with RSVP speed reading
+#
+# Dual-mode launcher:
+#   Terminal (isatty) → TUI (ratatui, runs in terminal)
+#   Desktop (no tty)  → GUI (LÖVE, runs as window)
+#   --gui flag        → force GUI mode, disown from terminal
+#
+# Usage:
+#   volta book.epub          # TUI in terminal, GUI from desktop icon
+#   volta --gui book.epub    # GUI even from terminal, prompt freed
+
+set -euo pipefail
+
+VOLTA_HOME="${VOLTA_HOME:-$HOME/volta}"
+FRONTEND="$VOLTA_HOME/frontend"
+TUI_BIN="$VOLTA_HOME/target/release/volta-tui"
+
+# ── Check for --gui flag ──
+FORCE_GUI=0
+ARGS=()
+for arg in "$@"; do
+    if [ "$arg" = "--gui" ]; then
+        FORCE_GUI=1
+    else
+        ARGS+=("$arg")
+    fi
+done
+set -- "${ARGS[@]}"
+
+# ── Build if needed ──
+NEEDS_BUILD=0
+if [[ ! -f "$TUI_BIN" ]] || [[ ! -f "$FRONTEND/libvolta_core.so" ]]; then
+    NEEDS_BUILD=1
+else
+    for src in "$VOLTA_HOME/core/src/"*.rs "$VOLTA_HOME/core/src/tui/"*.rs; do
+        [ -f "$src" ] || continue
+        [ "$src" -nt "$TUI_BIN" ] && NEEDS_BUILD=1 && break
+    done
+fi
+
+if [ $NEEDS_BUILD -eq 1 ]; then
+    echo "==> Building Volta..." >&2
+    cd "$VOLTA_HOME"
+    ./build.sh || exit 1
+fi
+
+# ── Update bridge.lua .so path if needed ──
+BRIDGE_LUA="$FRONTEND/bridge.lua"
+if grep -q 'local lib_path =' "$BRIDGE_LUA" 2>/dev/null; then
+    CURRENT_PATH=$(grep 'local lib_path =' "$BRIDGE_LUA" | head -1 | sed 's/.*"\(.*\)".*/\1/')
+    EXPECTED_PATH="$FRONTEND/libvolta_core.so"
+    if [[ "$CURRENT_PATH" != "$EXPECTED_PATH" ]]; then
+        sed -i "s|local lib_path = \".*\"|local lib_path = \"$EXPECTED_PATH\"|" "$BRIDGE_LUA"
+    fi
+fi
+
+# ── Dispatch ──
+if [ $FORCE_GUI -eq 1 ]; then
+    # Explicit --gui: launch LÖVE and disown so terminal is freed
+    love "$FRONTEND" "$@" &
+    disown
+elif [ -t 0 ]; then
+    # Running in a terminal (no --gui) → TUI mode
+    if [ $# -eq 0 ]; then
+        echo "Volta — terminal ebook reader with RSVP speed reading"
+        echo ""
+        echo "Usage: volta <file.epub>"
+        echo "       volta --gui <file.epub>   (GUI mode)"
+        echo "       volta --help              (keybindings)"
+        exit 1
+    fi
+    exec "$TUI_BIN" "$@"
+else
+    # Running from desktop/launcher (no terminal) → LÖVE GUI mode
+    exec love "$FRONTEND" "$@"
+fi

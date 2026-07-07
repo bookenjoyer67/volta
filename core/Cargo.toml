@@ -1,0 +1,22 @@
+[package]
+name = "volta-core"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[lib]
+name = "volta_core"
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[[bin]]
+name = "volta-tui"
+path = "src/main.rs"
+
+[dependencies]
+rbook = "0.7"
+libc = "0.2"
+sha2 = "0.10"
+ratatui = "0.29"
+crossterm = "0.28"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

@@ -1,0 +1,7 @@
+[Desktop Entry]
+Name=Volta
+Comment=Desktop ebook reader with RSVP speed reading
+Exec=/home/computing/volta/volta
+Terminal=false
+Type=Application
+Categories=Office;Viewer;
