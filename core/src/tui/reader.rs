@@ -167,10 +167,11 @@ impl ReaderState {
             / visible.max(1);
         let current_page = (self.scroll / visible.max(1)) + 1;
         let status = format!(
-            "Page {}/{}  |  Word {}  |  j/k scroll  arrows cursor  r RSVP  Esc quit",
+            "Page {}/{}  |  Word {}  |  {}  |  j/k scroll  arrows cursor  t theme  r RSVP  Esc quit",
             current_page.min(pages.max(1)),
             pages.max(1),
             self.cursor_word + 1,
+            theme.name,
         );
         let status_line = Line::from(Span::styled(
             status,

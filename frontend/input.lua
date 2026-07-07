@@ -32,6 +32,10 @@ M.defaults = {
   reader_chapter_top = "g",
   reader_chapter_bottom = "g",
 
+  -- Theme cycling
+  reader_cycle_theme = "t",
+  reader_cycle_theme_rev = "T",
+
   -- Cursor movement (arrow keys)
   reader_cursor_up = "up",
   reader_cursor_down = "down",

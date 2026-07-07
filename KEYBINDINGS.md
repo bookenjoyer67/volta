@@ -15,6 +15,8 @@
 | `n` | Next chapter |
 | `p` | Previous chapter |
 | `r` | Enter RSVP speed reading **at cursor position** |
+| `t` | **Cycle to next theme** |
+| `T` | **Cycle to previous theme** |
 | `Ctrl+S` | **Manual save progress** |
 | `Esc` | Back to menu |
 | `Mouse wheel` | Scroll text |
@@ -31,6 +33,8 @@
 | `=` | Increase WPM (+25) |
 | `-` | Decrease WPM (-25) |
 | `s` | Toggle stats overlay |
+| `t` | **Cycle to next theme** |
+| `T` | **Cycle to previous theme** |
 | `Ctrl+S` | **Manual save progress** |
 | `Esc` | Exit RSVP, return to reader |
 

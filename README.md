@@ -94,6 +94,7 @@ Flowing text. Scroll, navigate chapters, place cursor anywhere. Press `r` to dro
 | `G` | Bottom of chapter |
 | `n` `p` | Next/prev chapter |
 | `r` | Enter RSVP at cursor |
+| `t` / `T` | Next / previous theme |
 | `Ctrl+s` | Save progress |
 
 ### ⚡ RSVP Mode
@@ -107,6 +108,7 @@ One word at a time, centered, adjustable speed. Pure reading flow.
 | `k` `j` | Seek ±100 words |
 | `=` `-` | WPM ±25 |
 | `s` | Toggle stats overlay |
+| `t` / `T` | Next / previous theme |
 | `Esc` | Return to reader |
 
 Full keybindings: [KEYBINDINGS.md](KEYBINDINGS.md)

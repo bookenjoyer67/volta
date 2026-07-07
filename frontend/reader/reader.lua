@@ -434,6 +434,20 @@ function M:keypressed(key, scancode, isrepeat)
 
   elseif key == "s" and (love.keyboard.isDown("lctrl") or love.keyboard.isDown("rctrl")) then
     M:_save_progress()
+
+  -- Theme cycling (t = next, T = previous)
+  elseif key == kb:get("reader_cycle_theme") then
+    config:cycle_theme(1)
+    M:init()
+    M:_reflow()
+    love.graphics.setBackgroundColor(unpack(config.theme.reader.bg))
+
+  elseif key == kb:get("reader_cycle_theme_rev") then
+    config:cycle_theme(-1)
+    M:init()
+    M:_reflow()
+    love.graphics.setBackgroundColor(unpack(config.theme.reader.bg))
+
   end
 end
 

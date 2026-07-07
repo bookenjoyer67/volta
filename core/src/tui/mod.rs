@@ -15,7 +15,13 @@ use volta_core::player::PlayerState;
 use volta_core::DocEnum;
 
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
-use ratatui::{Frame, layout::Rect, text::{Line, Span}, widgets::Paragraph, style::{Color, Style}};
+use ratatui::{
+    layout::Rect,
+    style::{Color, Style},
+    text::{Line, Span},
+    widgets::Paragraph,
+    Frame,
+};
 use std::io;
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -29,10 +35,11 @@ pub enum Mode {
 pub struct App {
     pub mode: Mode,
     pub doc: Option<DocEnum>,
-    pub file_path: Option<String>,  // for progress save key
+    pub file_path: Option<String>, // for progress save key
     pub should_quit: bool,
     pub last_tick: Instant,
-    pub save_flash: f64,  // seconds remaining for "Saved" confirmation
+    pub save_flash: f64,    // seconds remaining for "Saved" confirmation
+    pub theme_index: usize, // index into theme::THEMES
 }
 
 impl App {
@@ -45,6 +52,7 @@ impl App {
             should_quit: false,
             last_tick: Instant::now(),
             save_flash: 0.0,
+            theme_index: 0,
         }
     }
 
@@ -58,6 +66,7 @@ impl App {
             should_quit: false,
             last_tick: Instant::now(),
             save_flash: 0.0,
+            theme_index: 0,
         }
     }
 
@@ -139,40 +148,51 @@ impl App {
                 .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
             if let Some(obj) = data.as_object_mut() {
                 let key = self.file_path.as_deref().unwrap_or("unknown");
-                obj.insert(key.to_string(), serde_json::json!({
-                    "chapter": chapter,
-                    "cursor_word": cursor_word,
-                    "last_ts": std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_secs(),
-                }));
+                obj.insert(
+                    key.to_string(),
+                    serde_json::json!({
+                        "chapter": chapter,
+                        "cursor_word": cursor_word,
+                        "last_ts": std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs(),
+                    }),
+                );
             }
-            let _ = std::fs::write(&progress_path, serde_json::to_string(&data).unwrap_or_default());
+            let _ = std::fs::write(
+                &progress_path,
+                serde_json::to_string(&data).unwrap_or_default(),
+            );
             self.save_flash = 1.5;
         }
     }
 
+    /// Get the active theme from the THEMES array.
+    fn active_theme(&self) -> &theme::Theme {
+        &theme::THEMES[self.theme_index]
+    }
+
+    /// Cycle theme: dir=1 for next, dir=-1 for previous.
+    fn cycle_theme(&mut self, dir: i32) {
+        self.theme_index = theme::cycle_theme(self.theme_index, dir);
+    }
+
     pub fn render(&self, frame: &mut Frame) {
         let area = frame.area();
+        let thm = self.active_theme();
         match &self.mode {
             Mode::Menu(state) => {
-                state.render(frame, area, &theme::NEON);
+                state.render(frame, area, thm);
             }
             Mode::Reader(state) => {
                 if let Some(ref doc) = self.doc {
-                    state.render(frame, area, &theme::NEON, doc.doc());
+                    state.render(frame, area, thm, doc.doc());
                 }
             }
             Mode::Rsvp(state) => {
                 if let Some(ref doc) = self.doc {
-                    state.render(
-                        frame,
-                        area,
-                        &theme::NEON,
-                        doc.player(),
-                        doc.doc(),
-                    );
+                    state.render(frame, area, thm, doc.player(), doc.doc());
                 }
             }
         }
@@ -187,7 +207,12 @@ impl App {
             let line = Line::from(Span::styled("Saved", style));
             frame.render_widget(
                 Paragraph::new(line),
-                Rect::new(area.x + 1, area.y + area.height.saturating_sub(1), area.width, 1),
+                Rect::new(
+                    area.x + 1,
+                    area.y + area.height.saturating_sub(1),
+                    area.width,
+                    1,
+                ),
             );
         }
     }
@@ -333,6 +358,12 @@ impl App {
             ReaderAction::Save => {
                 self.save_progress();
             }
+            ReaderAction::ThemeNext => {
+                self.cycle_theme(1);
+            }
+            ReaderAction::ThemePrev => {
+                self.cycle_theme(-1);
+            }
             ReaderAction::Quit => {
                 self.should_quit = true;
             }
@@ -391,6 +422,12 @@ impl App {
             RsvpAction::Save => {
                 self.save_progress();
             }
+            RsvpAction::ThemeNext => {
+                self.cycle_theme(1);
+            }
+            RsvpAction::ThemePrev => {
+                self.cycle_theme(-1);
+            }
             RsvpAction::ExitToReader => {
                 doc.player_mut().pause();
                 let idx = doc.player().current() as usize;
@@ -430,9 +467,8 @@ fn load_saved_position(path: &Path) -> Option<(usize, usize)> {
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or_default();
     let key = path.to_string_lossy().to_string();
-    data.get(&key).map(|e| {
-        (e.chapter.unwrap_or(0), e.cursor_word.unwrap_or(0))
-    })
+    data.get(&key)
+        .map(|e| (e.chapter.unwrap_or(0), e.cursor_word.unwrap_or(0)))
 }
 
 // ── Action enums ──
@@ -458,9 +494,7 @@ impl MenuAction {
             KeyCode::Up => MenuAction::MoveUp,
             KeyCode::Down => MenuAction::MoveDown,
             KeyCode::Enter => MenuAction::Open,
-            KeyCode::Char('o')
-                if key.modifiers.contains(KeyModifiers::CONTROL) =>
-            {
+            KeyCode::Char('o') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 MenuAction::Browse
             }
             KeyCode::Esc | KeyCode::Char('q') => MenuAction::Quit,
@@ -483,6 +517,8 @@ enum ReaderAction {
     GBottom,
     EnterRsvp { cursor_word: usize, chapter: usize },
     Save,
+    ThemeNext,
+    ThemePrev,
     Quit,
 }
 
@@ -499,38 +535,65 @@ impl ReaderAction {
             KeyCode::Right => ReaderAction::CursorRight,
 
             KeyCode::Char('j') => {
-                let scroll = (state.scroll + 3).min(state.wrapped_lines.len().saturating_sub(1));
-                let cursor = state.line_word_offsets.get(scroll).copied().unwrap_or(state.cursor_word);
+                let scroll =
+                    (state.scroll + 3).min(state.wrapped_lines.len().saturating_sub(1));
+                let cursor = state
+                    .line_word_offsets
+                    .get(scroll)
+                    .copied()
+                    .unwrap_or(state.cursor_word);
                 ReaderAction::ScrollTo { scroll, cursor }
             }
             KeyCode::Char('k') => {
                 let scroll = state.scroll.saturating_sub(3);
-                let cursor = state.line_word_offsets.get(scroll).copied().unwrap_or(state.cursor_word);
+                let cursor = state
+                    .line_word_offsets
+                    .get(scroll)
+                    .copied()
+                    .unwrap_or(state.cursor_word);
                 ReaderAction::ScrollTo { scroll, cursor }
             }
 
             KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 let h = 10;
-                let scroll = (state.scroll + h).min(state.wrapped_lines.len().saturating_sub(1));
-                let cursor = state.line_word_offsets.get(scroll).copied().unwrap_or(state.cursor_word);
+                let scroll =
+                    (state.scroll + h).min(state.wrapped_lines.len().saturating_sub(1));
+                let cursor = state
+                    .line_word_offsets
+                    .get(scroll)
+                    .copied()
+                    .unwrap_or(state.cursor_word);
                 ReaderAction::ScrollTo { scroll, cursor }
             }
             KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 let h = 10;
                 let scroll = state.scroll.saturating_sub(h);
-                let cursor = state.line_word_offsets.get(scroll).copied().unwrap_or(state.cursor_word);
+                let cursor = state
+                    .line_word_offsets
+                    .get(scroll)
+                    .copied()
+                    .unwrap_or(state.cursor_word);
                 ReaderAction::ScrollTo { scroll, cursor }
             }
             KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 let h = 20;
-                let scroll = (state.scroll + h).min(state.wrapped_lines.len().saturating_sub(1));
-                let cursor = state.line_word_offsets.get(scroll).copied().unwrap_or(state.cursor_word);
+                let scroll =
+                    (state.scroll + h).min(state.wrapped_lines.len().saturating_sub(1));
+                let cursor = state
+                    .line_word_offsets
+                    .get(scroll)
+                    .copied()
+                    .unwrap_or(state.cursor_word);
                 ReaderAction::ScrollTo { scroll, cursor }
             }
             KeyCode::Char('b') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 let h = 20;
                 let scroll = state.scroll.saturating_sub(h);
-                let cursor = state.line_word_offsets.get(scroll).copied().unwrap_or(state.cursor_word);
+                let cursor = state
+                    .line_word_offsets
+                    .get(scroll)
+                    .copied()
+                    .unwrap_or(state.cursor_word);
                 ReaderAction::ScrollTo { scroll, cursor }
             }
 
@@ -560,11 +623,15 @@ impl ReaderAction {
                 chapter: state.chapter,
             },
 
-            KeyCode::Char('s')
-                if key.modifiers.contains(KeyModifiers::CONTROL) =>
-            {
+            KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 ReaderAction::Save
             }
+
+            // Theme cycling
+            KeyCode::Char('t') if !key.modifiers.contains(KeyModifiers::SHIFT) => {
+                ReaderAction::ThemeNext
+            }
+            KeyCode::Char('T') => ReaderAction::ThemePrev,
 
             KeyCode::Char('q') | KeyCode::Esc => ReaderAction::Quit,
 
@@ -583,6 +650,8 @@ enum RsvpAction {
     SpeedUp,
     SpeedDown,
     Save,
+    ThemeNext,
+    ThemePrev,
     ExitToReader,
     Quit,
 }
@@ -597,11 +666,11 @@ impl RsvpAction {
             KeyCode::Down | KeyCode::Char('j') => RsvpAction::SeekBack100,
             KeyCode::Char('=') => RsvpAction::SpeedUp,
             KeyCode::Char('-') => RsvpAction::SpeedDown,
-            KeyCode::Char('s')
-                if key.modifiers.contains(KeyModifiers::CONTROL) =>
-            {
-                RsvpAction::Save
+            KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => RsvpAction::Save,
+            KeyCode::Char('t') if !key.modifiers.contains(KeyModifiers::SHIFT) => {
+                RsvpAction::ThemeNext
             }
+            KeyCode::Char('T') => RsvpAction::ThemePrev,
             KeyCode::Esc => RsvpAction::ExitToReader,
             KeyCode::Char('q') => RsvpAction::Quit,
             _ => RsvpAction::None,
@@ -615,7 +684,9 @@ fn cursor_up(state: &mut ReaderState) {
     let cur_line = state.cursor_line();
     if cur_line > 0 {
         let prev = cur_line - 1;
-        let offset = state.cursor_word.saturating_sub(state.line_word_offsets[cur_line]);
+        let offset = state
+            .cursor_word
+            .saturating_sub(state.line_word_offsets[cur_line]);
         let first = state.line_word_offsets[prev];
         state.cursor_word = first + offset;
         if prev + 1 < state.line_word_offsets.len() {
@@ -630,7 +701,9 @@ fn cursor_down(state: &mut ReaderState) {
     let cur_line = state.cursor_line();
     if cur_line + 1 < state.line_word_offsets.len() {
         let next = cur_line + 1;
-        let offset = state.cursor_word.saturating_sub(state.line_word_offsets[cur_line]);
+        let offset = state
+            .cursor_word
+            .saturating_sub(state.line_word_offsets[cur_line]);
         let first = state.line_word_offsets[next];
         state.cursor_word = first + offset;
         if next + 1 < state.line_word_offsets.len() {
