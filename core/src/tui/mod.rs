@@ -11,6 +11,7 @@ use rsvp::RsvpState;
 
 use volta_core::doc::Document;
 use volta_core::epub::EpubDoc;
+use volta_core::pdf::PdfDoc;
 use volta_core::player::PlayerState;
 use volta_core::DocEnum;
 
@@ -84,15 +85,31 @@ impl App {
 
     /// Open a book from the menu, switching to reader mode.
     fn open_book(&mut self, path: &Path) {
-        let epub = match EpubDoc::open(path) {
-            Ok(_e) => _e,
-            Err(_e) => {
-                // Stay in menu on error
-                return;
+        let ext = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+
+        let doc: DocEnum = match ext.as_str() {
+            "epub" => {
+                let epub = match EpubDoc::open(path) {
+                    Ok(e) => e,
+                    Err(_) => return,
+                };
+                let total = epub.word_count() as usize;
+                DocEnum::Epub(epub, PlayerState::new(total, 300))
             }
+            "pdf" => {
+                let pdf = match PdfDoc::open(path) {
+                    Ok(p) => p,
+                    Err(_) => return,
+                };
+                let total = pdf.word_count() as usize;
+                DocEnum::Pdf(pdf, PlayerState::new(total, 300))
+            }
+            _ => return,
         };
-        let total = epub.word_count() as usize;
-        let doc = DocEnum::Epub(epub, PlayerState::new(total, 300));
 
         // Try to restore saved position
         let saved = load_saved_position(path);

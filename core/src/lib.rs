@@ -23,7 +23,7 @@
 // pdf stays private (only used through the DocEnum dispatcher).
 pub mod doc;
 pub mod epub;
-mod pdf;
+pub mod pdf;
 pub mod player;
 pub mod types;
 

@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use volta_core::doc::Document;
 use volta_core::epub::EpubDoc;
+use volta_core::pdf::PdfDoc;
 use volta_core::player::PlayerState;
 use volta_core::DocEnum;
 
@@ -42,6 +43,15 @@ fn open_epub(path: &Path) -> DocEnum {
     DocEnum::Epub(epub, PlayerState::new(total, 300))
 }
 
+fn open_pdf(path: &Path) -> DocEnum {
+    let pdf = PdfDoc::open(path).unwrap_or_else(|e| {
+        eprintln!("Error: {}", e);
+        std::process::exit(1);
+    });
+    let total = pdf.word_count() as usize;
+    DocEnum::Pdf(pdf, PlayerState::new(total, 300))
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
 
@@ -71,13 +81,10 @@ fn main() {
 
     let doc = match ext.as_str() {
         "epub" => open_epub(path),
-        "pdf" => {
-            eprintln!("PDF support in TUI mode coming soon. Use --gui for PDF.");
-            std::process::exit(1);
-        }
+        "pdf" => open_pdf(path),
         _ => {
             eprintln!("Unsupported format: .{}", ext);
-            eprintln!("Supported: .epub");
+            eprintln!("Supported: .epub, .pdf");
             std::process::exit(1);
         }
     };
@@ -105,6 +112,7 @@ fn print_help() {
     eprintln!("USAGE:");
     eprintln!("  volta-tui                  Open menu");
     eprintln!("  volta-tui <file.epub>     Open EPUB in reader mode");
+    eprintln!("  volta-tui <file.pdf>      Open PDF in reader mode");
     eprintln!();
     eprintln!("MENU:");
     eprintln!("  ↑/↓        Navigate items");
