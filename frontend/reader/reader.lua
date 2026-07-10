@@ -21,6 +21,7 @@ M.current_chapter = 0
 M.line_height = 0
 M.font_size = 18
 M.margin = 60
+M._header_h = 52  -- header bar height, used in scroll calculations
 M.wrapped_lines = {}
 
 -- line_word_offsets[i] = word index (within the chapter) that
@@ -30,8 +31,18 @@ M.line_word_offsets = {}
 -- Word cursor (vim-style): word index within current chapter
 M.cursor_word = 0
 M._gg_timer = 0  -- time of last 'g' press for gg detection
+M._gt_timer = 0  -- time of last 'g' press for gt chord detection
 M._line_word_x = {}  -- _line_word_x[line_i] = {word1_x, word2_x, ...} per-word x-offsets
 M._save_flash = 0   -- seconds remaining for "Saved" confirmation
+
+-- Search state
+M.search_query = ""
+M.search_active = false    -- typing in search bar
+M.search_matches = {}      -- {{chapter=ch, word_offset=wo}, ...}
+M.search_idx = 0
+M.has_matches = false      -- matches exist, n/N navigate them
+M.jump_stack = {}          -- {{chapter, cursor_word}, ...} for Ctrl+o back
+M._needs_reflow = false    -- reflow needed on next draw
 
 function M:init()
   M.font_size = config.theme.reader.font_size or 18
@@ -136,7 +147,7 @@ end
 -- visible line, based on current scroll position.
 function M:visible_word_offset()
   local visible_lines = math.floor(
-    (love.graphics.getHeight() - 40) / math.max(1, M.line_height)
+    (love.graphics.getHeight() - M._header_h) / math.max(1, M.line_height)
   )
   local first_line = math.floor(
     M.scroll_y / math.max(1, M.line_height)
@@ -161,16 +172,105 @@ function M:_scroll_to_cursor()
   local line_y = (line - 1) * M.line_height
   local h = love.graphics.getHeight()
   local visible_top = M.scroll_y
-  local visible_bottom = M.scroll_y + h - 40
+  local visible_bottom = M.scroll_y + h - M._header_h
 
   if line_y < visible_top then
     M.scroll_y = math.max(0, line_y - M.line_height)
   elseif line_y + M.line_height > visible_bottom then
-    M.scroll_y = line_y + M.line_height - h + 40 + M.line_height
+    M.scroll_y = line_y + M.line_height - h + M._header_h + M.line_height
   end
 end
 
+--- Push current position onto jump-back stack.
+function M:_push_jump()
+  local pos = {M.current_chapter, M.cursor_word}
+  local top = M.jump_stack[#M.jump_stack]
+  if not top or top[1] ~= pos[1] or top[2] ~= pos[2] then
+    table.insert(M.jump_stack, pos)
+    if #M.jump_stack > 20 then
+      table.remove(M.jump_stack, 1)
+    end
+  end
+end
+
+--- Execute case-insensitive search across all chapters.
+-- Populates M.search_matches with {chapter=ch, word_offset=wo}.
+function M:_execute_search()
+  M.search_matches = {}
+  M.search_idx = 0
+  local query = M.search_query:lower()
+  if query == "" then return end
+
+  local total_chapters = book:chapter_count()
+  for ch = 0, total_chapters - 1 do
+    local text = book:chapter_text(ch):lower()
+    local start = 1
+    while true do
+      local found = text:find(query, start, true)
+      if not found then break end
+      -- Count words before this character position
+      local prefix = book:chapter_text(ch):sub(1, found - 1)
+      local word_offset = 0
+      for _ in prefix:gmatch("%S+") do
+        word_offset = word_offset + 1
+      end
+      table.insert(M.search_matches, {chapter = ch, word_offset = word_offset})
+      start = found + #query
+    end
+  end
+
+  M.has_matches = #M.search_matches > 0
+  if M.has_matches then
+    M.search_idx = 1
+    M:_jump_to_match()
+  end
+end
+
+--- Jump to the match at M.search_idx.
+function M:_jump_to_match()
+  if #M.search_matches == 0 then return end
+  M:_push_jump()
+  local idx = math.min(M.search_idx, #M.search_matches)
+  local m = M.search_matches[idx]
+  M.current_chapter = m.chapter
+  M.cursor_word = m.word_offset
+  M.scroll_y = 0
+  M:_reflow()
+  M:_scroll_to_cursor()
+end
+
+--- Search next match (wraps around).
+function M:_search_next()
+  if #M.search_matches == 0 then return end
+  M.search_idx = M.search_idx + 1
+  if M.search_idx > #M.search_matches then M.search_idx = 1 end
+  M:_jump_to_match()
+end
+
+--- Search previous match (wraps around).
+function M:_search_prev()
+  if #M.search_matches == 0 then return end
+  M.search_idx = M.search_idx - 1
+  if M.search_idx < 1 then M.search_idx = #M.search_matches end
+  M:_jump_to_match()
+end
+
+--- Build a set of match word offsets in the current chapter (for highlighting).
+function M:_match_set()
+  local s = {}
+  for _, m in ipairs(M.search_matches) do
+    if m.chapter == M.current_chapter then
+      s[m.word_offset] = true
+    end
+  end
+  return s
+end
+
 function M:draw()
+  if M._needs_reflow then
+    M:_reflow()
+    M._needs_reflow = false
+  end
   if not book:is_loaded() then return end
   if not M.font then M:init() end
 
@@ -180,38 +280,109 @@ function M:draw()
   love.graphics.clear(unpack(theme.bg))
   love.graphics.setFont(M.font)
 
-  -- Title bar
-  local title = book:title() .. "  |  Chapter "
-    .. (M.current_chapter + 1) .. "/" .. book:chapter_count()
-  love.graphics.setColor(unpack(theme.heading))
-  love.graphics.print(title, 10, 5)
-
-  -- Chapter progress bar
+  -- ── Header bar ──
   local total_chapters = book:chapter_count()
+
+  -- Header background (slightly darker than page)
+  love.graphics.setColor(theme.bg[1]*0.85, theme.bg[2]*0.85, theme.bg[3]*0.85, 0.95)
+  love.graphics.rectangle("fill", 0, 0, w, M._header_h)
+  -- Bottom border
+  love.graphics.setColor(theme.heading[1]*0.3, theme.heading[2]*0.3, theme.heading[3]*0.3)
+  love.graphics.rectangle("fill", 0, M._header_h - 1, w, 1)
+
+  -- Format icon
+  local icon = "📘"
+  if book.file_path then
+    local ext = book.file_path:match("%.([^.]+)$"):lower() or ""
+    if ext == "epub" then icon = "📖"
+    elseif ext == "pdf" then icon = "📄"
+    elseif ext == "md" then icon = "📝" end
+  end
+
+  -- Title line: icon + book title | Ch X/Y | progress %
+  local title_text = icon .. " " .. book:title()
+  local title_font = love.graphics.newFont(14)
+  love.graphics.setFont(title_font)
+  love.graphics.setColor(unpack(theme.heading))
+  love.graphics.print(title_text, 10, 6)
+  -- Title dimensions for truncation
+  if title_font:getWidth(title_text) > w - 200 then
+    while title_font:getWidth(title_text .. "…") > w - 200 and #title_text > 10 do
+      title_text = title_text:sub(1, -2)
+    end
+    title_text = title_text .. "…"
+    love.graphics.print(title_text, 10, 6)
+  end
+
+  -- Chapter + progress on right
+  local ch_text = string.format("Ch %d/%d", M.current_chapter + 1, total_chapters)
+  local pct = 0
   if total_chapters > 0 then
-    local bar_w = w - 400
-    local bar_x = w - bar_w - 10
-    love.graphics.setColor(0.3, 0.3, 0.3)
-    love.graphics.rectangle("fill", bar_x, 10, bar_w, 6)
-    love.graphics.setColor(unpack(theme.link))
-    love.graphics.rectangle("fill", bar_x, 10,
-      bar_w * ((M.current_chapter + 1) / total_chapters), 6)
+    pct = math.floor((M.current_chapter + 1) / total_chapters * 100)
+  end
+  local right_text = string.format("%s  ▏ %d%%", ch_text, pct)
+  love.graphics.setFont(love.graphics.newFont(12))
+  love.graphics.setColor(theme.heading[1]*0.5, theme.heading[2]*0.5, theme.heading[3]*0.5)
+  love.graphics.print(right_text, w - love.graphics.newFont(12):getWidth(right_text) - 10, 8)
+
+  -- Chapter title line
+  local ch_title = book:chapter_title(M.current_chapter)
+  if ch_title and ch_title ~= "" then
+    love.graphics.setFont(love.graphics.newFont(12))
+    love.graphics.setColor(theme.heading[1]*0.7, theme.heading[2]*0.7, theme.heading[3]*0.7)
+    local ch_display = ch_title
+    if love.graphics.newFont(12):getWidth(ch_display) > w - 20 then
+      while love.graphics.newFont(12):getWidth(ch_display .. "…") > w - 20 and #ch_display > 10 do
+        ch_display = ch_display:sub(1, -2)
+      end
+      ch_display = ch_display .. "…"
+    end
+    love.graphics.print(ch_display, 14, 30)
   end
 
   -- Text content
-  love.graphics.setColor(unpack(theme.text))
-  local y = 40 - M.scroll_y
+  local match_set = M:_match_set()
+  local y = M._header_h - M.scroll_y
   for i, line in ipairs(M.wrapped_lines) do
     local ly = y + (i - 1) * M.line_height
     if ly + M.line_height > 0 and ly < h then
-      love.graphics.print(line, M.margin, ly)
+      if M.has_matches then
+        -- Word-by-word rendering with match highlighting
+        local x = M.margin
+        local first_word = M.line_word_offsets[i] or 0
+        local word_idx = 0
+        for word in line:gmatch("%S+") do
+          local global_idx = first_word + word_idx
+          local is_match = match_set[global_idx]
+          local is_cursor = (global_idx == M.cursor_word)
+          word_idx = word_idx + 1
+
+          if is_cursor then
+            local cursor_color = theme.cursor or theme.selection or {0.3, 0.5, 1, 0.35}
+            love.graphics.setColor(unpack(cursor_color))
+            love.graphics.rectangle("fill", x - 2, ly, M.font:getWidth(word) + 4, M.line_height)
+            love.graphics.setColor(unpack(theme.text))
+          elseif is_match then
+            love.graphics.setColor(1, 0.78, 0.2)
+            love.graphics.rectangle("fill", x - 1, ly, M.font:getWidth(word) + 2, M.line_height)
+            love.graphics.setColor(0, 0, 0)
+          else
+            love.graphics.setColor(unpack(theme.text))
+          end
+          love.graphics.print(word, x, ly)
+          x = x + M.font:getWidth(word) + M.font:getWidth(" ")
+        end
+      else
+        love.graphics.setColor(unpack(theme.text))
+        love.graphics.print(line, M.margin, ly)
+      end
     end
   end
 
   -- Cursor word highlight
   local cursor_line_idx = M:_line_for_word(M.cursor_word)
-  local cursor_y = 40 + (cursor_line_idx - 1) * M.line_height - M.scroll_y
-  if cursor_y >= 40 and cursor_y < h
+  local cursor_y = M._header_h + (cursor_line_idx - 1) * M.line_height - M.scroll_y
+  if cursor_y >= M._header_h and cursor_y < h
       and M._line_word_x[cursor_line_idx] then
     local word_offset = M.cursor_word - M.line_word_offsets[cursor_line_idx] + 1
     local word_x = M._line_word_x[cursor_line_idx][word_offset]
@@ -238,15 +409,63 @@ function M:draw()
     end
   end
 
-  -- Position indicator
-  local visible_lines = math.floor((h - 40) / math.max(1, M.line_height))
-  local pages = math.max(1,
-    math.ceil(#M.wrapped_lines / math.max(1, visible_lines)))
-  local current_page = math.min(pages,
-    math.floor(M.scroll_y / math.max(1, visible_lines * M.line_height)) + 1)
-  love.graphics.setColor(0.5, 0.5, 0.5)
-  love.graphics.print(
-    string.format("Page %d/%d", current_page, pages), w - 120, h - 25)
+  -- Scrollbar on right edge
+  local sb_w = 6
+  local sb_x = w - sb_w - 4
+  local sb_h = h - M._header_h - 4
+  if sb_h > 0 and w > 200 then
+    local max_scroll = math.max(1, #M.wrapped_lines * M.line_height - sb_h)
+    local thumb_h = math.max(20, sb_h * sb_h / math.max(1, (#M.wrapped_lines * M.line_height)))
+    local thumb_y = M._header_h + (M.scroll_y / max_scroll) * (sb_h - thumb_h)
+
+    -- Track
+    love.graphics.setColor(0.08, 0.08, 0.12)
+    love.graphics.rectangle("fill", sb_x, M._header_h, sb_w, sb_h, 3, 3)
+
+    -- Thumb
+    love.graphics.setColor(unpack(theme.selection))
+    love.graphics.rectangle("fill", sb_x, thumb_y, sb_w, thumb_h, 3, 3)
+
+    -- Global position dot on left of scrollbar
+    if book:chapter_count() > 0 then
+      local global_pct = (M.current_chapter + M.scroll_y / math.max(1, max_scroll + M.scroll_y)) / book:chapter_count()
+      local dot_y = M._header_h + global_pct * sb_h
+      love.graphics.setColor(theme.selection[1], theme.selection[2], theme.selection[3], 0.5)
+      love.graphics.rectangle("fill", sb_x - 6, dot_y - 2, 4, 4, 1, 1)
+    end
+  end
+
+  -- Position / search indicator
+  if M.search_active then
+    -- Search input bar at bottom
+    love.graphics.setColor(0, 0, 0, 0.85)
+    love.graphics.rectangle("fill", 0, h - 32, w, 32)
+    love.graphics.setColor(unpack(theme.selection))
+    local prompt = "/" .. M.search_query
+    love.graphics.setFont(love.graphics.newFont(16))
+    love.graphics.print(prompt, 10, h - 28)
+  elseif M.has_matches then
+    love.graphics.setColor(0.5, 0.5, 0.5)
+    love.graphics.setFont(love.graphics.newFont(12))
+    love.graphics.print(
+      string.format("Match %d/%d", M.search_idx, #M.search_matches),
+      w - 150, h - 25)
+  else
+    local visible_lines = math.floor((h - M._header_h) / math.max(1, M.line_height))
+    local pages = math.max(1,
+      math.ceil(#M.wrapped_lines / math.max(1, visible_lines)))
+    local current_page = math.min(pages,
+      math.floor(M.scroll_y / math.max(1, visible_lines * M.line_height)) + 1)
+    love.graphics.setColor(0.5, 0.5, 0.5)
+    love.graphics.print(
+      string.format("Page %d/%d", current_page, pages), w - 120, h - 25)
+  end
+
+  -- Status bar (theme name + key hints)
+  love.graphics.setColor(0.4, 0.4, 0.4)
+  love.graphics.setFont(love.graphics.newFont(11))
+  local status_left = config.theme_name .. "  |  / search  |  r RSVP  |  t/T theme  |  Ctrl+S save"
+  love.graphics.print(status_left, 10, h - 16)
 
   -- "Saved" flash
   if M._save_flash > 0 then
@@ -261,9 +480,32 @@ end
 function M:keypressed(key, scancode, isrepeat)
   local kb = input_mod
 
-  -- Reset gg timer on any key except 'g'
+  -- ── Search input mode (captures all keystrokes) ──
+  if M.search_active then
+    if key == "escape" then
+      M.search_active = false
+      M.search_query = ""
+    elseif key == "backspace" then
+      M.search_query = M.search_query:sub(1, -2)
+    elseif key == "return" then
+      M.search_active = false
+      M:_execute_search()
+    end
+    return  -- block all other keys during search input
+  end
+
+  -- Reset gg/gt timer on any key except 'g'
   if key ~= kb:get("reader_chapter_top") then
     M._gg_timer = 0
+    M._gt_timer = 0
+  end
+
+  -- ── Toggle search ──
+
+  if key == kb:get("reader_toggle_search") then
+    M.search_active = true
+    M.search_query = ""
+    return
   end
 
   -- ── Cursor movement (arrow keys) ──
@@ -376,15 +618,27 @@ function M:keypressed(key, scancode, isrepeat)
 
   -- ── Chapter navigation ──
 
-  elseif key == kb:get("reader_next_chapter") then
-    if M.current_chapter < book:chapter_count() - 1 then
+  elseif key == kb:get("reader_search_next") then
+    if M.has_matches then
+      M:_search_next()
+    elseif M.current_chapter < book:chapter_count() - 1 then
       M.current_chapter = M.current_chapter + 1
       M.scroll_y = 0
       M.cursor_word = 0
       M:_reflow()
     end
 
-  elseif key == kb:get("reader_prev_chapter") then
+  elseif key == kb:get("reader_search_prev") then
+    if M.has_matches then
+      M:_search_prev()
+    elseif M.current_chapter > 0 then
+      M.current_chapter = M.current_chapter - 1
+      M.scroll_y = 0
+      M.cursor_word = 0
+      M:_reflow()
+    end
+
+  elseif key == "p" and not M.has_matches then
     if M.current_chapter > 0 then
       M.current_chapter = M.current_chapter - 1
       M.scroll_y = 0
@@ -396,13 +650,29 @@ function M:keypressed(key, scancode, isrepeat)
 
   elseif key == kb:get("reader_chapter_top") then
     local now = love.timer.getTime()
-    if M._gg_timer > 0 and (now - M._gg_timer) < 0.3 then
+    -- gt chord: g then t within 300ms enters TOC
+    if M._gt_timer > 0 and (now - M._gt_timer) < 0.3 then
+      M._gt_timer = 0
+      -- handled below
+    -- gg chord: double-tap g within 300ms goes to top
+    elseif M._gg_timer > 0 and (now - M._gg_timer) < 0.3 then
       M.scroll_y = 0
       M.cursor_word = 0
       M._gg_timer = 0
+      M._gt_timer = 0
     else
       M._gg_timer = now
+      M._gt_timer = now
     end
+
+  -- gt chord: 't' after 'g' enters TOC
+  elseif key == "t" and M._gt_timer > 0
+      and (love.timer.getTime() - M._gt_timer) < 0.3 then
+    M._gt_timer = 0
+    M:_push_jump()
+    require("ui.toc"):enter(M.current_chapter, M.cursor_word)
+    set_mode("toc")
+    return
 
   elseif key == kb:get("reader_chapter_bottom")
       and (love.keyboard.isDown("lshift") or love.keyboard.isDown("rshift")) then
@@ -418,10 +688,28 @@ function M:keypressed(key, scancode, isrepeat)
     require("rsvp.rsvp"):enter()
     set_mode("rsvp")
 
-  -- ── Back to menu ──
+  -- ── Back to menu / clear search ──
 
   elseif key == kb:get("reader_escape") then
-    set_mode("menu")
+    if M.has_matches then
+      M.has_matches = false
+      M.search_matches = {}
+      M.search_idx = 0
+    else
+      set_mode("menu")
+    end
+
+  -- ── Jump back (Ctrl+o) ──
+
+  elseif key == "o" and (love.keyboard.isDown("lctrl") or love.keyboard.isDown("rctrl")) then
+    if #M.jump_stack > 0 then
+      local pos = table.remove(M.jump_stack)
+      M.current_chapter = pos[1]
+      M.cursor_word = pos[2]
+      M.scroll_y = 0
+      M:_reflow()
+      M:_scroll_to_cursor()
+    end
 
   -- ── Manual save (Ctrl+S) ──
 
@@ -441,6 +729,12 @@ function M:keypressed(key, scancode, isrepeat)
     M:_reflow()
     love.graphics.setBackgroundColor(unpack(config.theme.reader.bg))
 
+  end
+end
+
+function M:textinput(t)
+  if M.search_active and #t == 1 then
+    M.search_query = M.search_query .. t
   end
 end
 

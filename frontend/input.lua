@@ -42,6 +42,11 @@ M.defaults = {
   reader_cursor_left = "left",
   reader_cursor_right = "right",
 
+  -- Search
+  reader_toggle_search = "/",
+  reader_search_next = "n",
+  reader_search_prev = "N",
+
   -- RSVP mode
   rsvp_play_pause = "space",
   rsvp_seek_back_10 = "left",

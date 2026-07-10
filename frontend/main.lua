@@ -77,6 +77,8 @@ function love.draw()
     require("reader.reader"):draw()
   elseif mode == "rsvp" then
     require("rsvp.rsvp"):draw()
+  elseif mode == "toc" then
+    require("ui.toc"):draw()
   end
 end
 
@@ -88,13 +90,19 @@ function love.keypressed(key, scancode, isrepeat)
     require("reader.reader"):keypressed(key, scancode, isrepeat)
   elseif mode == "rsvp" then
     require("rsvp.rsvp"):keypressed(key, scancode, isrepeat)
+  elseif mode == "toc" then
+    require("ui.toc"):keypressed(key, scancode, isrepeat)
   end
 end
 
 --- Text input (only RSVP mode uses this for numeric WPM entry).
 function love.textinput(t)
-  if mode == "rsvp" then
+  if mode == "reader" then
+    require("reader.reader"):textinput(t)
+  elseif mode == "rsvp" then
     require("rsvp.rsvp"):textinput(t)
+  elseif mode == "toc" then
+    require("ui.toc"):textinput(t)
   end
 end
 

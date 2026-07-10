@@ -27,12 +27,45 @@
 | `n` | Next chapter *(or next search match when search is active)* |
 | `p` | Previous chapter |
 | `N` | Previous search match *(when search is active)* |
-| `r` | Enter RSVP speed reading **at cursor position** |
-| `t` | Cycle to next theme |
-| `T` | Cycle to previous theme |
-| `/` | Start search — type your query, Enter to execute, Esc to cancel |
-| `Ctrl+S` | **Save progress** (does not auto-save!) |
-| `Esc` | Return to library |
+|| `r` | Enter RSVP speed reading **at cursor position** |
+|| `t` | Cycle to next theme |
+|| `T` | Cycle to previous theme |
+|| `gt` | Open Table of Contents overlay (tap `g` then `t` quickly) |
+|| `Ctrl+o` | Jump back to previous position (undo TOC/search jump) |
+|| `/` | Start search — type your query, Enter to execute, Esc to cancel |
+|| `Ctrl+S` | **Save progress** (does not auto-save!) |
+|| `Esc` | Clear search / Return to library |
+
+### Scrollbar
+
+A vertical scrollbar on the right edge shows your position within the current chapter.
+A small dot next to it shows your global position in the book.
+
+## Table of Contents
+
+Open with `gt` in reader mode. A centered overlay lists all chapter titles.
+
+|| Key | Action |
+||-----|--------|
+|| `j` / `↓` | Move selection down |
+|| `k` / `↑` | Move selection up |
+|| `Enter` | Jump to selected chapter |
+|| `Esc` | Cancel — return to reader at previous position |
+|| `/` | Toggle filter — type to narrow chapters by title |
+|| `gg` | Jump to top of list |
+|| `G` | Jump to bottom of list |
+
+Filtered chapters are highlighted. Press `/` again to clear the filter.
+
+## Jump-Back Stack
+
+Every search jump and TOC jump pushes your previous position onto a stack.
+
+|| Key | Action |
+||-----|--------|
+|| `Ctrl+o` | Pop the stack and return to your previous position |
+
+The stack holds up to 20 positions. Duplicates are not pushed.
 
 ## RSVP Mode
 
