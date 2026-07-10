@@ -149,18 +149,21 @@ impl App {
             _ => return,
         };
 
-        // Add to library
+        // Capture saved position before add_to_library resets it
         let path_str = path.to_string_lossy().to_string();
+        let saved = self.library.get(&path_str)
+            .map(|e| (e.current_chapter as usize, e.current_word));
+
         add_to_library(&mut self.library, &path_str, doc.doc());
 
-        // Try to restore saved position
-        let saved = load_saved_position(path);
         let mut reader = ReaderState::new(doc.doc());
         if let Some((ch, cw)) = saved {
             let count = doc.doc().chapter_count() as usize;
-            reader.chapter = ch.min(count.saturating_sub(1));
-            reader.cursor_word = cw;
-            reader.scroll_to_cursor(20);
+            if ch > 0 || cw > 0 {
+                reader.chapter = ch.min(count.saturating_sub(1));
+                reader.cursor_word = cw;
+                reader.scroll_to_cursor(20);
+            }
         }
 
         self.file_path = Some(path.to_string_lossy().to_string());
@@ -704,25 +707,6 @@ impl App {
 }
 
 // ── Load saved position from progress.json ──
-
-#[derive(serde::Deserialize, Default)]
-struct ProgressEntry {
-    chapter: Option<usize>,
-    cursor_word: Option<usize>,
-}
-
-fn load_saved_position(path: &Path) -> Option<(usize, usize)> {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-    let progress_file = format!("{}/.local/share/volta/progress.json", home);
-    let data: std::collections::HashMap<String, ProgressEntry> =
-        std::fs::read_to_string(&progress_file)
-            .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default();
-    let key = path.to_string_lossy().to_string();
-    data.get(&key)
-        .map(|e| (e.chapter.unwrap_or(0), e.cursor_word.unwrap_or(0)))
-}
 
 impl App {
     fn handle_toc_action(&mut self, action: TocAction) {
