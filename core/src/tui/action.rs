@@ -1,7 +1,9 @@
 //! Reader action enum and keybinding dispatch.
 //! Extracted from mod.rs to keep keybindings self-contained.
 
+use crate::tui::menu::MenuState;
 use crate::tui::reader::ReaderState;
+use crate::tui::toc::TocState;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::time::{Duration, Instant};
 
@@ -226,4 +228,123 @@ impl RsvpAction {
             _ => RsvpAction::None,
         }
     }
+}
+
+// ── Menu actions ──
+
+pub enum MenuAction {
+    None,
+    Open,
+    Browse,
+    Quit,
+}
+
+impl MenuAction {
+    pub fn from_key(state: &mut MenuState, key: KeyEvent, total_entries: usize) -> Self {
+        match key.code {
+            KeyCode::Up => {
+                if state.selected_row > 0 {
+                    state.selected_row -= 1;
+                }
+                MenuAction::None
+            }
+            KeyCode::Down => {
+                let max_row = state.max_row(total_entries);
+                if state.selected_row < max_row {
+                    state.selected_row += 1;
+                }
+                MenuAction::None
+            }
+            KeyCode::Left => {
+                if state.selected_col > 0 {
+                    state.selected_col -= 1;
+                }
+                MenuAction::None
+            }
+            KeyCode::Right => {
+                let max_col = state.max_col(total_entries);
+                if state.selected_col < max_col {
+                    state.selected_col += 1;
+                }
+                MenuAction::None
+            }
+            KeyCode::Enter => MenuAction::Open,
+            KeyCode::Char('o') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                MenuAction::Browse
+            }
+            KeyCode::Esc | KeyCode::Char('q') => MenuAction::Quit,
+            _ => MenuAction::None,
+        }
+    }
+}
+
+// ── Toc actions ──
+
+pub enum TocAction {
+    None,
+    MoveUp,
+    MoveDown,
+    Select,
+    Cancel,
+    ToggleFilter,
+    FilterChar(char),
+    FilterBackspace,
+    GgTop,
+    GBottom,
+}
+
+impl TocAction {
+    pub fn from_key(state: &mut TocState, key: KeyEvent) -> Self {
+        // Filter mode
+        if state.filter_active {
+            match key.code {
+                KeyCode::Esc => {
+                    state.filter_active = false;
+                    return TocAction::None;
+                }
+                KeyCode::Enter => {
+                    state.filter_active = false;
+                    return TocAction::None;
+                }
+                KeyCode::Backspace => return TocAction::FilterBackspace,
+                KeyCode::Char(c) => return TocAction::FilterChar(c),
+                _ => return TocAction::None,
+            }
+        }
+
+        // Clear gg timer on non-g keys
+        if key.code != KeyCode::Char('g') {
+            state.gg_timer = None;
+        }
+
+        match key.code {
+            KeyCode::Esc => TocAction::Cancel,
+            KeyCode::Enter => TocAction::Select,
+            KeyCode::Up | KeyCode::Char('k') => TocAction::MoveUp,
+            KeyCode::Down | KeyCode::Char('j') => TocAction::MoveDown,
+            KeyCode::Char('/') => TocAction::ToggleFilter,
+            KeyCode::Char('g') => {
+                let now = std::time::Instant::now();
+                if let Some(t) = state.gg_timer {
+                    if now.duration_since(t) < std::time::Duration::from_millis(300) {
+                        state.gg_timer = None;
+                        return TocAction::GgTop;
+                    }
+                }
+                state.gg_timer = Some(now);
+                TocAction::None
+            }
+            KeyCode::Char('G') => TocAction::GBottom,
+            _ => TocAction::None,
+        }
+    }
+}
+
+// ── Umbrella action enum ──
+
+pub enum Action {
+    Menu(MenuAction),
+    Reader(ReaderAction),
+    Rsvp(RsvpAction),
+    Toc(TocAction),
 }
