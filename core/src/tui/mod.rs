@@ -4,10 +4,12 @@ pub mod menu;
 pub mod reader;
 pub mod rsvp;
 pub mod theme;
+pub mod toc;
 
 use menu::{CARD_H, CARD_W, MenuState};
 use reader::ReaderState;
 use rsvp::RsvpState;
+use toc::TocState;
 
 use volta_core::doc::Document;
 use volta_core::epub::EpubDoc;
@@ -33,6 +35,7 @@ pub enum Mode {
     Menu(MenuState),
     Reader(ReaderState),
     Rsvp(RsvpState),
+    Toc(TocState),
 }
 
 pub struct App {
@@ -49,6 +52,7 @@ pub struct App {
     pub search_matches: Vec<(usize, usize)>, // (chapter_idx, word_offset)
     pub search_idx: usize,
     pub search_input: bool, // true = typing search query
+    pub jump_stack: Vec<(usize, usize)>, // (chapter, cursor_word) for Ctrl+o back
 }
 
 impl App {
@@ -68,6 +72,7 @@ impl App {
             search_matches: Vec::new(),
             search_idx: 0,
             search_input: false,
+            jump_stack: Vec::new(),
         }
     }
 
@@ -90,6 +95,7 @@ impl App {
             search_matches: Vec::new(),
             search_idx: 0,
             search_input: false,
+            jump_stack: Vec::new(),
         }
     }
 
@@ -207,6 +213,19 @@ impl App {
         self.theme_index = theme::cycle_theme(self.theme_index, dir);
     }
 
+    /// Push current reader position onto jump-back stack (if different from top).
+    fn push_jump(&mut self) {
+        if let Mode::Reader(ref state) = &self.mode {
+            let pos = (state.chapter, state.cursor_word);
+            if self.jump_stack.last() != Some(&pos) {
+                self.jump_stack.push(pos);
+                if self.jump_stack.len() > 20 {
+                    self.jump_stack.remove(0);
+                }
+            }
+        }
+    }
+
     /// Execute a case-insensitive search across all chapters.
     /// Populates self.search_matches with (chapter_idx, word_offset) pairs.
     fn execute_search(&mut self) {
@@ -247,6 +266,7 @@ impl App {
         let idx = self.search_idx.min(self.search_matches.len() - 1);
         let (ch, word_offset) = self.search_matches[idx];
 
+        self.push_jump();
         if let Mode::Reader(ref mut state) = &mut self.mode {
             state.chapter = ch;
             state.cursor_word = word_offset;
@@ -326,6 +346,9 @@ impl App {
                     state.render(frame, area, thm, doc.player(), doc.doc());
                 }
             }
+            Mode::Toc(ref mut state) => {
+                state.render(frame, area, thm);
+            }
         }
         if self.search_input {
             let prompt = format!("/{}", self.search_query);
@@ -402,12 +425,14 @@ impl App {
                 ))
             }
             Mode::Rsvp(state) => Action::Rsvp(RsvpAction::from_key(state, key)),
+            Mode::Toc(state) => Action::Toc(TocAction::from_key(state, key)),
         };
 
         match action {
             Action::Menu(a) => self.handle_menu_action(a),
             Action::Reader(a) => self.handle_reader_action(a),
             Action::Rsvp(a) => self.handle_rsvp_action(a),
+            Action::Toc(a) => self.handle_toc_action(a),
         }
     }
 
@@ -520,6 +545,27 @@ impl App {
                     state.gg_timer = None;
                     state.scroll = state.wrapped_lines.len().saturating_sub(1);
                     state.cursor_word = state.line_word_offsets.last().copied().unwrap_or(0);
+                }
+            }
+            ReaderAction::EnterToc {
+                chapter,
+                cursor_word,
+            } => {
+                self.push_jump();
+                if let Some(ref doc) = self.doc {
+                    let toc = TocState::new(doc.doc(), chapter, cursor_word);
+                    self.mode = Mode::Toc(toc);
+                }
+            }
+            ReaderAction::JumpBack => {
+                if let Some((ch, cw)) = self.jump_stack.pop() {
+                    if let Mode::Reader(ref mut state) = &mut self.mode {
+                        let count = doc.doc().chapter_count() as usize;
+                        state.chapter = ch.min(count.saturating_sub(1));
+                        state.cursor_word = cw;
+                        state.reflow(doc.doc(), 80);
+                        state.scroll_to_cursor(20);
+                    }
                 }
             }
             ReaderAction::EnterRsvp { cursor_word, chapter } => {
@@ -673,6 +719,7 @@ enum Action {
     Menu(MenuAction),
     Reader(ReaderAction),
     Rsvp(RsvpAction),
+    Toc(TocAction),
 }
 
 enum MenuAction {
@@ -738,6 +785,8 @@ enum ReaderAction {
     GgArm,
     GBottom,
     EnterRsvp { cursor_word: usize, chapter: usize },
+    EnterToc { chapter: usize, cursor_word: usize },
+    JumpBack,
     Save,
     ThemeNext,
     ThemePrev,
@@ -750,7 +799,7 @@ enum ReaderAction {
 
 impl ReaderAction {
     fn from_key(state: &mut ReaderState, key: KeyEvent, has_search: bool) -> Self {
-        if key.code != KeyCode::Char('g') {
+        if key.code != KeyCode::Char('g') && key.code != KeyCode::Char('t') {
             state.gg_timer = None;
         }
 
@@ -780,6 +829,9 @@ impl ReaderAction {
                 }
             }
 
+            KeyCode::Char('o') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                ReaderAction::JumpBack
+            }
             KeyCode::Char('p') => ReaderAction::PrevChapter,
 
             KeyCode::Char('j') => {
@@ -849,12 +901,31 @@ impl ReaderAction {
                 let now = Instant::now();
                 if let Some(t) = state.gg_timer {
                     if now.duration_since(t) < Duration::from_millis(300) {
+                        state.gg_timer = None;
                         ReaderAction::GgTop
                     } else {
-                        ReaderAction::GgArm
+                        state.gg_timer = Some(now);
+                        ReaderAction::None
                     }
                 } else {
-                    ReaderAction::GgArm
+                    state.gg_timer = Some(now);
+                    ReaderAction::None
+                }
+            }
+            KeyCode::Char('t') if state.gg_timer.is_some() => {
+                if let Some(t) = state.gg_timer {
+                    if Instant::now().duration_since(t) < Duration::from_millis(300) {
+                        state.gg_timer = None;
+                        ReaderAction::EnterToc {
+                            chapter: state.chapter,
+                            cursor_word: state.cursor_word,
+                        }
+                    } else {
+                        state.gg_timer = None;
+                        ReaderAction::None
+                    }
+                } else {
+                    ReaderAction::None
                 }
             }
             KeyCode::Char('G') | KeyCode::Char('g')
@@ -919,6 +990,172 @@ impl RsvpAction {
             KeyCode::Esc => RsvpAction::ExitToReader,
             KeyCode::Char('q') => RsvpAction::Quit,
             _ => RsvpAction::None,
+        }
+    }
+}
+
+// ── Toc actions ──
+
+enum TocAction {
+    None,
+    MoveUp,
+    MoveDown,
+    Select,
+    Cancel,
+    ToggleFilter,
+    FilterChar(char),
+    FilterBackspace,
+    GgTop,
+    GBottom,
+}
+
+impl TocAction {
+    fn from_key(state: &mut TocState, key: KeyEvent) -> Self {
+        // Filter mode
+        if state.filter_active {
+            match key.code {
+                KeyCode::Esc => {
+                    state.filter_active = false;
+                    return TocAction::None;
+                }
+                KeyCode::Enter => {
+                    state.filter_active = false;
+                    return TocAction::None;
+                }
+                KeyCode::Backspace => return TocAction::FilterBackspace,
+                KeyCode::Char(c) => return TocAction::FilterChar(c),
+                _ => return TocAction::None,
+            }
+        }
+
+        // Clear gg timer on non-g keys
+        if key.code != KeyCode::Char('g') {
+            state.gg_timer = None;
+        }
+
+        match key.code {
+            KeyCode::Esc => TocAction::Cancel,
+            KeyCode::Enter => TocAction::Select,
+            KeyCode::Up | KeyCode::Char('k') => TocAction::MoveUp,
+            KeyCode::Down | KeyCode::Char('j') => TocAction::MoveDown,
+            KeyCode::Char('/') => TocAction::ToggleFilter,
+            KeyCode::Char('g') => {
+                let now = std::time::Instant::now();
+                if let Some(t) = state.gg_timer {
+                    if now.duration_since(t) < std::time::Duration::from_millis(300) {
+                        state.gg_timer = None;
+                        return TocAction::GgTop;
+                    }
+                }
+                state.gg_timer = Some(now);
+                TocAction::None
+            }
+            KeyCode::Char('G') => TocAction::GBottom,
+            _ => TocAction::None,
+        }
+    }
+}
+
+impl App {
+    fn handle_toc_action(&mut self, action: TocAction) {
+        let doc = match &self.doc {
+            Some(d) => d,
+            None => return,
+        };
+
+        match action {
+            TocAction::None => {}
+            TocAction::MoveUp => {
+                if let Mode::Toc(ref mut state) = &mut self.mode {
+                    if state.selected > 0 {
+                        state.selected -= 1;
+                        state.ensure_visible(10);
+                    }
+                }
+            }
+            TocAction::MoveDown => {
+                if let Mode::Toc(ref mut state) = &mut self.mode {
+                    if state.selected + 1 < state.filtered.len() {
+                        state.selected += 1;
+                        state.ensure_visible(10);
+                    }
+                }
+            }
+            TocAction::Select => {
+                let (target_ch, _source_ch, _source_cw) = if let Mode::Toc(ref state) = &self.mode {
+                    if state.filtered.is_empty() {
+                        return;
+                    }
+                    let idx = state.selected.min(state.filtered.len() - 1);
+                    (
+                        state.filtered[idx],
+                        state.source_chapter,
+                        state.source_cursor,
+                    )
+                } else {
+                    return;
+                };
+
+                let count = doc.doc().chapter_count() as usize;
+                let ch = target_ch.min(count.saturating_sub(1));
+
+                // Switch to reader at the selected chapter
+                let mut reader = ReaderState::new(doc.doc());
+                reader.chapter = ch;
+                reader.cursor_word = 0;
+                reader.reflow(doc.doc(), 80);
+                reader.scroll_to_cursor(20);
+                self.mode = Mode::Reader(reader);
+            }
+            TocAction::Cancel => {
+                // Return to reader at the source position
+                let (ch, cw) = if let Mode::Toc(ref state) = &self.mode {
+                    (state.source_chapter, state.source_cursor)
+                } else {
+                    return;
+                };
+                let mut reader = ReaderState::new(doc.doc());
+                let count = doc.doc().chapter_count() as usize;
+                reader.chapter = ch.min(count.saturating_sub(1));
+                reader.cursor_word = cw;
+                reader.reflow(doc.doc(), 80);
+                reader.scroll_to_cursor(20);
+                self.mode = Mode::Reader(reader);
+            }
+            TocAction::ToggleFilter => {
+                if let Mode::Toc(ref mut state) = &mut self.mode {
+                    state.filter_active = !state.filter_active;
+                    if !state.filter_active {
+                        state.filter.clear();
+                        state.apply_filter();
+                    }
+                }
+            }
+            TocAction::FilterChar(c) => {
+                if let Mode::Toc(ref mut state) = &mut self.mode {
+                    state.filter.push(c);
+                    state.apply_filter();
+                }
+            }
+            TocAction::FilterBackspace => {
+                if let Mode::Toc(ref mut state) = &mut self.mode {
+                    state.filter.pop();
+                    state.apply_filter();
+                }
+            }
+            TocAction::GgTop => {
+                if let Mode::Toc(ref mut state) = &mut self.mode {
+                    state.selected = 0;
+                    state.scroll = 0;
+                }
+            }
+            TocAction::GBottom => {
+                if let Mode::Toc(ref mut state) = &mut self.mode {
+                    let last = state.filtered.len().saturating_sub(1);
+                    state.selected = last;
+                    state.scroll = last.saturating_sub(9);
+                }
+            }
         }
     }
 }
