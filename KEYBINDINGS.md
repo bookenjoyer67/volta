@@ -1,5 +1,15 @@
 # Volta Keybindings
 
+## Library (Home Screen)
+
+| Key | Action |
+|-----|--------|
+| `↑` / `↓` | Move up/down one row of cards |
+| `←` / `→` | Move left/right one card |
+| `Enter` | Open selected book |
+| `Ctrl+O` | Browse for file |
+| `Esc` | Quit |
+
 ## Reader Mode
 
 | Key | Action |
@@ -22,7 +32,7 @@
 | `T` | Cycle to previous theme |
 | `/` | Start search — type your query, Enter to execute, Esc to cancel |
 | `Ctrl+S` | **Save progress** (does not auto-save!) |
-| `Esc` | Clear search / quit |
+| `Esc` | Return to library |
 
 ## RSVP Mode
 
@@ -39,16 +49,7 @@
 | `t` | Cycle to next theme |
 | `T` | Cycle to previous theme |
 | `Ctrl+S` | **Save progress** |
-| `Esc` | Exit RSVP, return to reader |
-
-## Menu
-
-| Key | Action |
-|-----|--------|
-| `↑` / `↓` | Navigate items |
-| `Enter` | Open selected (first item = continue reading) |
-| `Ctrl+O` | Open file picker |
-| `Esc` | Quit |
+| `Esc` | Return to reader |
 
 ## Search
 

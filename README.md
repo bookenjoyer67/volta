@@ -16,7 +16,7 @@
   <br>
   Normal reading <b>or</b> one-word-at-a-time flow.
   <br>
-  Terminal <b>or</b> GUI. EPUB <b>or</b> PDF.
+  Terminal <b>or</b> GUI. EPUB, PDF, <b>or</b> Markdown.
 </p>
 
 ---
@@ -25,14 +25,16 @@
 
 | | |
 |---|---|
+| **Library grid** | Home screen with book covers, titles, authors, progress bars. Arrow key navigation. |
+| **Cover images** | EPUB covers extracted automatically. PDF page-1 thumbnails via pdftoppm. Cached in `~/.cache/volta/covers/`. |
 | **Dual-mode** | TUI (terminal) when launched from shell, GUI (LÖVE) when launched from desktop |
 | **RSVP** | Rapid Serial Visual Presentation — words flash one at a time at configurable speed |
-| **Progress saving** | Press `Ctrl+S` to save your position. Resume where you left off. |
+| **Progress saving** | Press `Ctrl+S` to save your position. Resume where you left off. Does NOT auto-save. |
 | **8 built-in themes** | Neon, Sepia, Night, Dusk, Daylight, Forest, Ocean, Amber — cycle with `t`/`T` |
-| **Keyboard-driven** | Arrow keys move cursor. `j` scrolls down, `k` scrolls up. `Ctrl+d`/`u` half-page, `Ctrl+f`/`b` full page. `gg` jump top, `G` jump bottom. |
-| **EPUB + PDF** | rbook for EPUB parsing, poppler for PDF extraction |
-| **Cursor-based RSVP entry** | Place cursor on any word in reader mode, press `r` — RSVP starts from that exact position |
 | **Full-text search** | Press `/` to search across all chapters. `n` for next match, `N` for previous. Matches highlighted in gold. |
+| **Keyboard-driven** | Arrow keys move cursor. `j`/`k` scroll, `n`/`p` chapters, `gg`/`G` top/bottom. |
+| **EPUB + PDF + MD** | rbook for EPUB, poppler for PDF, plain-text for Markdown |
+| **Cursor-based RSVP entry** | Place cursor on any word in reader mode, press `r` — RSVP starts from that exact position |
 
 ## Install
 
@@ -65,10 +67,11 @@ The `volta` launcher auto-detects whether you're in a terminal (→ TUI) or laun
 ## Usage
 
 ```bash
-volta                  # Open menu (browse files or pick recent)
-volta book.epub        # Open EPUB directly in reader mode
-volta document.pdf     # PDF via pdftotext (TUI) or page images (GUI)
-volta --gui book.epub  # Force GUI mode even from terminal
+volta                      # Open library grid
+volta book.epub            # Open EPUB directly in reader mode
+volta document.pdf         # PDF via pdftotext (TUI) or page images (GUI)
+volta notes.md             # Markdown, split on headings
+volta --gui book.epub      # Force GUI mode even from terminal
 ```
 
 ### Desktop entry
@@ -80,6 +83,17 @@ cp volta.desktop ~/.local/share/applications/
 Then launch Volta from your app launcher. GUI mode, no terminal window.
 
 ## Modes
+
+### 🏠 Library
+
+Card grid showing all your books. Covers, titles, authors, progress bars. Arrow keys navigate, Enter opens, `Ctrl+O` browses for new files, `Esc` quits.
+
+| Key | Action |
+|-----|--------|
+| `↑` `↓` `←` `→` | Navigate cards |
+| `Enter` | Open selected book |
+| `Ctrl+O` | Browse for file |
+| `Esc` | Quit |
 
 ### 📖 Reader Mode
 
@@ -98,7 +112,7 @@ Flowing text. Scroll, navigate chapters, place cursor anywhere. Press `r` to dro
 | `t` / `T` | Next / previous theme |
 | `/` | Search across all chapters (type query, Enter to find) |
 | `n` / `N` | Next/previous search match (when search is active) |
-| `Esc` | Clear search / go back |
+| `Esc` | Return to library |
 | `Ctrl+s` | Save progress |
 
 ### ⚡ RSVP Mode
@@ -121,12 +135,17 @@ Full keybindings: [KEYBINDINGS.md](KEYBINDINGS.md)
 
 ```
 volta/
-├── core/              Rust — EPUB parsing (rbook), RSVP engine, TUI (ratatui)
+├── core/              Rust — EPUB/PDF/MD parsing, RSVP engine, TUI (ratatui)
 │   ├── src/main.rs    TUI binary entrypoint
+│   ├── src/lib.rs     FFI exports for LÖVE bridge
+│   ├── src/library.rs Library persistence (library.json)
+│   ├── src/cover.rs   Cover extraction (EPUB manifest, PDF thumbnail)
+│   ├── src/md.rs      Markdown document backend
 │   └── src/tui/       Menu, reader, RSVP views
 ├── frontend/          Lua — LÖVE GUI, FFI bridge to Rust core
 │   ├── main.lua       love.load/draw/update dispatch
 │   ├── bridge.lua     LuaJIT FFI → libvolta_core.so
+│   ├── ui/menu.lua    Library grid with cover images
 │   ├── reader.lua     Normal reading mode
 │   ├── rsvp.lua       RSVP display + timer
 │   └── themes/        Built-in color themes
@@ -142,7 +161,7 @@ Deep dive: [ARCHITECTURE.md](ARCHITECTURE.md)
 
 | Layer | Tech |
 |-------|------|
-| Core engine | Rust (`rbook`, `sha2`, `serde_json`) |
+| Core engine | Rust (`rbook`, `sha2`, `serde_json`, `image`) |
 | TUI | `ratatui` + `crossterm` |
 | GUI | LÖVE 11.x (LuaJIT) |
 | FFI bridge | LuaJIT FFI → C ABI from Rust `cdylib` |
