@@ -8,6 +8,7 @@ pub mod theme;
 pub mod toc;
 
 use action::ReaderAction;
+use action::RsvpAction;
 use menu::{CARD_H, CARD_W, MenuState};
 use reader::ReaderState;
 use rsvp::RsvpState;
@@ -749,44 +750,6 @@ impl MenuAction {
             }
             KeyCode::Esc | KeyCode::Char('q') => MenuAction::Quit,
             _ => MenuAction::None,
-        }
-    }
-}
-
-enum RsvpAction {
-    None,
-    TogglePlay,
-    SeekBack10,
-    SeekForward10,
-    SeekBack100,
-    SeekForward100,
-    SpeedUp,
-    SpeedDown,
-    Save,
-    ThemeNext,
-    ThemePrev,
-    ExitToReader,
-    Quit,
-}
-
-impl RsvpAction {
-    fn from_key(_state: &RsvpState, key: KeyEvent) -> Self {
-        match key.code {
-            KeyCode::Char(' ') => RsvpAction::TogglePlay,
-            KeyCode::Left | KeyCode::Char('h') => RsvpAction::SeekBack10,
-            KeyCode::Right | KeyCode::Char('l') => RsvpAction::SeekForward10,
-            KeyCode::Up | KeyCode::Char('k') => RsvpAction::SeekForward100,
-            KeyCode::Down | KeyCode::Char('j') => RsvpAction::SeekBack100,
-            KeyCode::Char('=') => RsvpAction::SpeedUp,
-            KeyCode::Char('-') => RsvpAction::SpeedDown,
-            KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => RsvpAction::Save,
-            KeyCode::Char('t') if !key.modifiers.contains(KeyModifiers::SHIFT) => {
-                RsvpAction::ThemeNext
-            }
-            KeyCode::Char('T') => RsvpAction::ThemePrev,
-            KeyCode::Esc => RsvpAction::ExitToReader,
-            KeyCode::Char('q') => RsvpAction::Quit,
-            _ => RsvpAction::None,
         }
     }
 }
