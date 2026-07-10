@@ -41,6 +41,11 @@ pub struct App {
     pub last_tick: Instant,
     pub save_flash: f64,    // seconds remaining for "Saved" confirmation
     pub theme_index: usize, // index into theme::THEMES
+    // Search state
+    pub search_query: String,
+    pub search_matches: Vec<(usize, usize)>, // (chapter_idx, word_offset)
+    pub search_idx: usize,
+    pub search_input: bool, // true = typing search query
 }
 
 impl App {
@@ -54,6 +59,10 @@ impl App {
             last_tick: Instant::now(),
             save_flash: 0.0,
             theme_index: 0,
+            search_query: String::new(),
+            search_matches: Vec::new(),
+            search_idx: 0,
+            search_input: false,
         }
     }
 
@@ -68,6 +77,10 @@ impl App {
             last_tick: Instant::now(),
             save_flash: 0.0,
             theme_index: 0,
+            search_query: String::new(),
+            search_matches: Vec::new(),
+            search_idx: 0,
+            search_input: false,
         }
     }
 
@@ -195,6 +208,76 @@ impl App {
         self.theme_index = theme::cycle_theme(self.theme_index, dir);
     }
 
+    /// Execute a case-insensitive search across all chapters.
+    /// Populates self.search_matches with (chapter_idx, word_offset) pairs.
+    fn execute_search(&mut self) {
+        self.search_matches.clear();
+        self.search_idx = 0;
+
+        let query = self.search_query.to_lowercase();
+        if query.is_empty() {
+            return;
+        }
+
+        let doc = match &self.doc {
+            Some(d) => d.doc(),
+            None => return,
+        };
+
+        for ch in 0..doc.chapter_count() {
+            let text = doc.chapter_text(ch);
+            let lower = text.to_lowercase();
+
+            let mut char_pos = 0;
+            while let Some(found) = lower[char_pos..].find(&query) {
+                let abs_pos = char_pos + found;
+                // Count words before this character position
+                let word_offset = text[..abs_pos].split_whitespace().count();
+                self.search_matches.push((ch as usize, word_offset));
+                char_pos = abs_pos + query.len();
+            }
+        }
+    }
+
+    /// Jump to match at search_idx, updating reader chapter/cursor/scroll.
+    fn jump_to_match(&mut self) {
+        if self.search_matches.is_empty() {
+            return;
+        }
+
+        let idx = self.search_idx.min(self.search_matches.len() - 1);
+        let (ch, word_offset) = self.search_matches[idx];
+
+        if let Mode::Reader(ref mut state) = &mut self.mode {
+            state.chapter = ch;
+            state.cursor_word = word_offset;
+            // Reflow will be done by the event loop on next frame
+            state.scroll_to_cursor(20);
+        }
+    }
+
+    /// Search next match (wraps around).
+    fn search_next(&mut self) {
+        if self.search_matches.is_empty() {
+            return;
+        }
+        self.search_idx = (self.search_idx + 1) % self.search_matches.len();
+        self.jump_to_match();
+    }
+
+    /// Search previous match (wraps around).
+    fn search_prev(&mut self) {
+        if self.search_matches.is_empty() {
+            return;
+        }
+        self.search_idx = if self.search_idx == 0 {
+            self.search_matches.len() - 1
+        } else {
+            self.search_idx - 1
+        };
+        self.jump_to_match();
+    }
+
     pub fn render(&self, frame: &mut Frame) {
         let area = frame.area();
         let thm = self.active_theme();
@@ -204,7 +287,14 @@ impl App {
             }
             Mode::Reader(state) => {
                 if let Some(ref doc) = self.doc {
-                    state.render(frame, area, thm, doc.doc());
+                    state.render(
+                        frame,
+                        area,
+                        thm,
+                        doc.doc(),
+                        &self.search_matches,
+                        self.search_idx,
+                    );
                 }
             }
             Mode::Rsvp(state) => {
@@ -212,6 +302,21 @@ impl App {
                     state.render(frame, area, thm, doc.player(), doc.doc());
                 }
             }
+        }
+        // Search bar
+        if self.search_input {
+            let prompt = format!("/{}", self.search_query);
+            let style = Style::default().fg(thm.cursor);
+            let line = Line::from(Span::styled(prompt, style));
+            frame.render_widget(
+                Paragraph::new(line),
+                Rect::new(
+                    area.x,
+                    area.y + area.height.saturating_sub(1),
+                    area.width,
+                    1,
+                ),
+            );
         }
         // "Saved" flash
         if self.save_flash > 0.0 {
@@ -235,9 +340,41 @@ impl App {
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) {
+        // Search input mode: capture all keystrokes
+        if self.search_input {
+            match key.code {
+                KeyCode::Esc => {
+                    self.search_input = false;
+                    self.search_query.clear();
+                }
+                KeyCode::Enter => {
+                    self.search_input = false;
+                    self.execute_search();
+                    if !self.search_matches.is_empty() {
+                        self.jump_to_match();
+                    }
+                }
+                KeyCode::Backspace => {
+                    self.search_query.pop();
+                }
+                KeyCode::Char(c) => {
+                    self.search_query.push(c);
+                }
+                _ => {}
+            }
+            return;
+        }
+
         let action = match &mut self.mode {
             Mode::Menu(state) => Action::Menu(MenuAction::from_key(state, key)),
-            Mode::Reader(state) => Action::Reader(ReaderAction::from_key(state, key)),
+            Mode::Reader(state) => {
+                // Pass search state to reader action dispatch
+                Action::Reader(ReaderAction::from_key(
+                    state,
+                    key,
+                    !self.search_matches.is_empty(),
+                ))
+            }
             Mode::Rsvp(state) => Action::Rsvp(RsvpAction::from_key(state, key)),
         };
 
@@ -383,6 +520,16 @@ impl App {
             }
             ReaderAction::Quit => {
                 self.should_quit = true;
+            }
+            ReaderAction::SearchStart => {
+                self.search_input = true;
+                self.search_query.clear();
+            }
+            ReaderAction::SearchNext => {
+                self.search_next();
+            }
+            ReaderAction::SearchPrev => {
+                self.search_prev();
             }
         }
     }
@@ -537,10 +684,13 @@ enum ReaderAction {
     ThemeNext,
     ThemePrev,
     Quit,
+    SearchStart,
+    SearchNext,
+    SearchPrev,
 }
 
 impl ReaderAction {
-    fn from_key(state: &mut ReaderState, key: KeyEvent) -> Self {
+    fn from_key(state: &mut ReaderState, key: KeyEvent, has_search: bool) -> Self {
         if key.code != KeyCode::Char('g') {
             state.gg_timer = None;
         }
@@ -550,6 +700,27 @@ impl ReaderAction {
             KeyCode::Down => ReaderAction::CursorDown,
             KeyCode::Left => ReaderAction::CursorLeft,
             KeyCode::Right => ReaderAction::CursorRight,
+
+            // Search: / enters search mode
+            KeyCode::Char('/') => ReaderAction::SearchStart,
+
+            // n/N: next/prev match if search active, else next/prev chapter
+            KeyCode::Char('n') => {
+                if has_search {
+                    ReaderAction::SearchNext
+                } else {
+                    ReaderAction::NextChapter
+                }
+            }
+            KeyCode::Char('N') => {
+                if has_search {
+                    ReaderAction::SearchPrev
+                } else {
+                    ReaderAction::None
+                }
+            }
+
+            KeyCode::Char('p') => ReaderAction::PrevChapter,
 
             KeyCode::Char('j') => {
                 let scroll =
@@ -613,9 +784,6 @@ impl ReaderAction {
                     .unwrap_or(state.cursor_word);
                 ReaderAction::ScrollTo { scroll, cursor }
             }
-
-            KeyCode::Char('n') => ReaderAction::NextChapter,
-            KeyCode::Char('p') => ReaderAction::PrevChapter,
 
             KeyCode::Char('g') if !key.modifiers.contains(KeyModifiers::SHIFT) => {
                 let now = Instant::now();

@@ -6,20 +6,23 @@
 |-----|--------|
 | `↓` / `↑` | Move cursor down/up one line |
 | `←` / `→` | Move cursor left/right one word |
-| `j` / `k` | Scroll down/up 3 lines |
-| `Ctrl+d` / `Ctrl+u` | Half-page down/up (vim-style) |
-| `Ctrl+f` / `Ctrl+b` | Page down/up (vim-style) |
-| `Space` / `Backspace` | Page down/up |
-| `gg` | Jump to top of chapter (double-tap g) |
-| `G` | Jump to bottom of chapter (shift+g) |
-| `n` | Next chapter |
+| `j` | Scroll down 3 lines |
+| `k` | Scroll up 3 lines |
+| `Ctrl+d` | Half-page down |
+| `Ctrl+u` | Half-page up |
+| `Ctrl+f` | Full page down |
+| `Ctrl+b` | Full page up |
+| `gg` | Jump to top of chapter (tap `g` twice quickly) |
+| `G` | Jump to bottom of chapter (Shift+G) |
+| `n` | Next chapter *(or next search match when search is active)* |
 | `p` | Previous chapter |
+| `N` | Previous search match *(when search is active)* |
 | `r` | Enter RSVP speed reading **at cursor position** |
-| `t` | **Cycle to next theme** |
-| `T` | **Cycle to previous theme** |
-| `Ctrl+S` | **Manual save progress** |
-| `Esc` | Back to menu |
-| `Mouse wheel` | Scroll text |
+| `t` | Cycle to next theme |
+| `T` | Cycle to previous theme |
+| `/` | Start search — type your query, Enter to execute, Esc to cancel |
+| `Ctrl+S` | **Save progress** (does not auto-save!) |
+| `Esc` | Clear search / quit |
 
 ## RSVP Mode
 
@@ -28,14 +31,14 @@
 | `Space` | Play / Pause |
 | `h` / `←` | Seek back 10 words |
 | `l` / `→` | Seek forward 10 words |
-| `k` / `↓` | Seek back 100 words |
-| `j` / `↑` | Seek forward 100 words |
+| `k` / `↑` | Seek back 100 words |
+| `j` / `↓` | Seek forward 100 words |
 | `=` | Increase WPM (+25) |
 | `-` | Decrease WPM (-25) |
 | `s` | Toggle stats overlay |
-| `t` | **Cycle to next theme** |
-| `T` | **Cycle to previous theme** |
-| `Ctrl+S` | **Manual save progress** |
+| `t` | Cycle to next theme |
+| `T` | Cycle to previous theme |
+| `Ctrl+S` | **Save progress** |
 | `Esc` | Exit RSVP, return to reader |
 
 ## Menu
@@ -46,13 +49,18 @@
 | `Enter` | Open selected (first item = continue reading) |
 | `Ctrl+O` | Open file picker |
 | `Esc` | Quit |
-| `Drag & drop` | Open EPUB/PDF file |
 
-## Global
+## Search
 
 | Key | Action |
 |-----|--------|
-| `/` | Toggle help overlay |
+| `/` | Enter search mode — type query, bottom bar shows input |
+| `Enter` | Execute search — jumps to first match |
+| `n` | Next match |
+| `N` | Previous match |
+| `Esc` | Clear search and all highlights |
+
+Search is case-insensitive and scans every chapter in the book. Matches appear in gold text. The cursor word (hot pink) takes priority when it overlaps a match.
 
 ## Customization
 

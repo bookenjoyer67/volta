@@ -27,11 +27,12 @@
 |---|---|
 | **Dual-mode** | TUI (terminal) when launched from shell, GUI (LÖVE) when launched from desktop |
 | **RSVP** | Rapid Serial Visual Presentation — words flash one at a time at configurable speed |
-| **Progress saving** | Auto-saves position. Resume where you left off. |
-| **8 built-in themes** | Neon, Sepia, Night, Dusk, Daylight, Forest, Ocean, Amber |
-| **Vim keybindings** | `hjkl`, `gg`/`G`, `Ctrl+d`/`u`/`f`/`b` — you already know them |
+| **Progress saving** | Press `Ctrl+S` to save your position. Resume where you left off. |
+| **8 built-in themes** | Neon, Sepia, Night, Dusk, Daylight, Forest, Ocean, Amber — cycle with `t`/`T` |
+| **Keyboard-driven** | Arrow keys move cursor. `j` scrolls down, `k` scrolls up. `Ctrl+d`/`u` half-page, `Ctrl+f`/`b` full page. `gg` jump top, `G` jump bottom. |
 | **EPUB + PDF** | rbook for EPUB parsing, poppler for PDF extraction |
 | **Cursor-based RSVP entry** | Place cursor on any word in reader mode, press `r` — RSVP starts from that exact position |
+| **Full-text search** | Press `/` to search across all chapters. `n` for next match, `N` for previous. Matches highlighted in gold. |
 
 ## Install
 
@@ -86,15 +87,18 @@ Flowing text. Scroll, navigate chapters, place cursor anywhere. Press `r` to dro
 
 | Key | Action |
 |-----|--------|
-| `↓` `↑` `←` `→` | Move cursor |
-| `j` `k` | Scroll 3 lines |
-| `Ctrl+d` `Ctrl+u` | Half‑page |
-| `Ctrl+f` `Ctrl+b` | Full page |
-| `gg` | Top of chapter |
-| `G` | Bottom of chapter |
-| `n` `p` | Next/prev chapter |
+| `↓` `↑` `←` `→` | Move cursor word by word or line by line |
+| `j` `k` | Scroll down/up 3 lines |
+| `Ctrl+d` `Ctrl+u` | Half-page down/up |
+| `Ctrl+f` `Ctrl+b` | Full page down/up |
+| `gg` | Jump to top of chapter (tap `g` twice) |
+| `G` | Jump to bottom of chapter |
+| `n` `p` | Next/previous chapter (when no search active) |
 | `r` | Enter RSVP at cursor |
 | `t` / `T` | Next / previous theme |
+| `/` | Search across all chapters (type query, Enter to find) |
+| `n` / `N` | Next/previous search match (when search is active) |
+| `Esc` | Clear search / go back |
 | `Ctrl+s` | Save progress |
 
 ### ⚡ RSVP Mode
