@@ -203,10 +203,6 @@ impl App {
         }
     }
 
-    /// Get the active theme from the THEMES array.
-    fn active_theme(&self) -> &theme::Theme {
-        &theme::THEMES[self.theme_index]
-    }
 
     /// Cycle theme: dir=1 for next, dir=-1 for previous.
     fn cycle_theme(&mut self, dir: i32) {
@@ -320,8 +316,6 @@ impl App {
             menu_entries.iter().map(|(p, e)| (p.as_str(), e)).collect();
         let search_matches = self.search_matches.clone();
         let search_idx = self.search_idx;
-        let search_input = self.search_input;
-        let search_query = self.search_query.clone();
 
         let thm = &theme::THEMES[thm_idx];
 
@@ -441,12 +435,7 @@ impl App {
     fn handle_menu_action(&mut self, action: MenuAction) {
         match action {
             MenuAction::None => {}
-            MenuAction::MoveUp
-            | MenuAction::MoveDown
-            | MenuAction::MoveLeft
-            | MenuAction::MoveRight => {
-                // Handled in from_key directly
-            }
+            
             MenuAction::Open => {
                 let path = match &self.mode {
                     Mode::Menu(state) => {
@@ -534,12 +523,8 @@ impl App {
                     state.cursor_word = 0;
                     state.gg_timer = None;
                 }
-            }
-            ReaderAction::GgArm => {
-                if let Mode::Reader(ref mut state) = &mut self.mode {
-                    state.gg_timer = Some(Instant::now());
-                }
-            }
+            } 
+
             ReaderAction::GBottom => {
                 if let Mode::Reader(ref mut state) = &mut self.mode {
                     state.gg_timer = None;
@@ -589,9 +574,7 @@ impl App {
             ReaderAction::ThemePrev => {
                 self.cycle_theme(-1);
             }
-            ReaderAction::Quit => {
-                self.should_quit = true;
-            }
+            
             ReaderAction::BackToMenu => {
                 self.mode = Mode::Menu(MenuState::new());
                 // Clear search state
@@ -723,11 +706,7 @@ enum Action {
 }
 
 enum MenuAction {
-    None,
-    MoveUp,
-    MoveDown,
-    MoveLeft,
-    MoveRight,
+    None, 
     Open,
     Browse,
     Quit,
@@ -782,15 +761,13 @@ enum ReaderAction {
     NextChapter,
     PrevChapter,
     GgTop,
-    GgArm,
     GBottom,
     EnterRsvp { cursor_word: usize, chapter: usize },
     EnterToc { chapter: usize, cursor_word: usize },
     JumpBack,
     Save,
     ThemeNext,
-    ThemePrev,
-    Quit,
+    ThemePrev, 
     BackToMenu,
     SearchStart,
     SearchNext,
@@ -854,48 +831,6 @@ impl ReaderAction {
                 ReaderAction::ScrollTo { scroll, cursor }
             }
 
-            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                let h = 10;
-                let scroll =
-                    (state.scroll + h).min(state.wrapped_lines.len().saturating_sub(1));
-                let cursor = state
-                    .line_word_offsets
-                    .get(scroll)
-                    .copied()
-                    .unwrap_or(state.cursor_word);
-                ReaderAction::ScrollTo { scroll, cursor }
-            }
-            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                let h = 10;
-                let scroll = state.scroll.saturating_sub(h);
-                let cursor = state
-                    .line_word_offsets
-                    .get(scroll)
-                    .copied()
-                    .unwrap_or(state.cursor_word);
-                ReaderAction::ScrollTo { scroll, cursor }
-            }
-            KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                let h = 20;
-                let scroll =
-                    (state.scroll + h).min(state.wrapped_lines.len().saturating_sub(1));
-                let cursor = state
-                    .line_word_offsets
-                    .get(scroll)
-                    .copied()
-                    .unwrap_or(state.cursor_word);
-                ReaderAction::ScrollTo { scroll, cursor }
-            }
-            KeyCode::Char('b') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                let h = 20;
-                let scroll = state.scroll.saturating_sub(h);
-                let cursor = state
-                    .line_word_offsets
-                    .get(scroll)
-                    .copied()
-                    .unwrap_or(state.cursor_word);
-                ReaderAction::ScrollTo { scroll, cursor }
-            }
 
             KeyCode::Char('g') if !key.modifiers.contains(KeyModifiers::SHIFT) => {
                 let now = Instant::now();
@@ -949,7 +884,7 @@ impl ReaderAction {
             }
             KeyCode::Char('T') => ReaderAction::ThemePrev,
 
-            KeyCode::Char('q') | KeyCode::Esc => ReaderAction::Quit,
+         
 
             _ => ReaderAction::None,
         }

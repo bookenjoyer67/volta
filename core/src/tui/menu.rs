@@ -151,24 +151,13 @@ impl MenuState {
             Style::default().fg(if pct > 0 { theme.cursor } else { Color::Gray }),
         ));
 
-        let ch_info = if entry.chapter_count > 0 {
-            format!("Ch {}/{}", entry.current_chapter + 1, entry.chapter_count)
-        } else {
-            String::new()
-        };
-        let time_ago = relative_time(entry.last_opened);
-        let footer = Line::from(Span::styled(
-            format!("{}  ·  {}", ch_info, time_ago),
-            Style::default().fg(theme.hud),
-        ));
-
         let lines = vec![
             header,
             Line::from(""),
             title_line,
             author_line,
             bar_line,
-            footer,
+           
         ];
 
         let paragraph = Paragraph::new(lines).block(block);
@@ -218,22 +207,4 @@ fn truncate(s: &str, max_len: usize) -> String {
     }
 }
 
-fn relative_time(ts: u64) -> String {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let diff = now.saturating_sub(ts);
 
-    if diff < 60 {
-        "just now".to_string()
-    } else if diff < 3600 {
-        format!("{}m ago", diff / 60)
-    } else if diff < 86400 {
-        format!("{}h ago", diff / 3600)
-    } else if diff < 604800 {
-        format!("{}d ago", diff / 86400)
-    } else {
-        "a while ago".to_string()
-    }
-}

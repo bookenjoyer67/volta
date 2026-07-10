@@ -188,8 +188,7 @@ impl ReaderState {
             for row in 0..sb_h as u16 {
                 let y = text_area.y + row;
                 if y < area.y + area.height {
-                    frame.buffer_mut()
-                        .get_mut(sb_x, y)
+                    frame.buffer_mut()[(sb_x, y)]
                         .set_char('│')
                         .set_fg(Color::Rgb(30, 30, 45))
                         .set_bg(Color::Reset);
@@ -200,7 +199,7 @@ impl ReaderState {
             for row in 0..thumb_h as u16 {
                 let y = text_area.y + thumb_y + row;
                 if y < area.y + area.height {
-                    let cell = frame.buffer_mut().get_mut(sb_x, y);
+                    let cell = &mut frame.buffer_mut()[(sb_x, y)];
                     cell.set_char('█').set_fg(theme.cursor).set_bg(Color::Reset);
                 }
             }
@@ -213,7 +212,7 @@ impl ReaderState {
                 let global_pct = ch_ratio + scroll_ratio / total_ch as f64;
                 let dot_y = text_area.y + (global_pct * sb_h as f64) as u16;
                 if dot_y < area.y + area.height {
-                    let cell = frame.buffer_mut().get_mut(sb_x.saturating_sub(1), dot_y);
+                    let cell = &mut frame.buffer_mut()[(sb_x.saturating_sub(1), dot_y)];
                     cell.set_char('·')
                         .set_fg(Color::Rgb(80, 80, 120))
                         .set_bg(Color::Reset);
