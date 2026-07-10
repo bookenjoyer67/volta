@@ -5,12 +5,14 @@ pub mod reader;
 pub mod rsvp;
 pub mod theme;
 
-use menu::MenuState;
+use menu::{CARD_H, CARD_W, MenuState};
 use reader::ReaderState;
 use rsvp::RsvpState;
 
 use volta_core::doc::Document;
 use volta_core::epub::EpubDoc;
+use volta_core::library::{Library, LibraryEntry};
+use volta_core::md::MdDoc;
 use volta_core::pdf::PdfDoc;
 use volta_core::player::PlayerState;
 use volta_core::DocEnum;
@@ -41,6 +43,7 @@ pub struct App {
     pub last_tick: Instant,
     pub save_flash: f64,    // seconds remaining for "Saved" confirmation
     pub theme_index: usize, // index into theme::THEMES
+    pub library: Library,
     // Search state
     pub search_query: String,
     pub search_matches: Vec<(usize, usize)>, // (chapter_idx, word_offset)
@@ -51,14 +54,16 @@ pub struct App {
 impl App {
     /// Create app in menu mode.
     pub fn new_menu() -> Self {
+        let library = Library::load();
         App {
-            mode: Mode::Menu(MenuState::load()),
+            mode: Mode::Menu(MenuState::new()),
             doc: None,
             file_path: None,
             should_quit: false,
             last_tick: Instant::now(),
             save_flash: 0.0,
             theme_index: 0,
+            library,
             search_query: String::new(),
             search_matches: Vec::new(),
             search_idx: 0,
@@ -68,7 +73,10 @@ impl App {
 
     /// Create app with a loaded document, starting in reader mode.
     pub fn new(doc: DocEnum, file_path: String) -> Self {
+        let mut library = Library::load();
         let reader = ReaderState::new(doc.doc());
+        // Add to library (after reader is created so doc.doc() is available)
+        add_to_library(&mut library, &file_path, doc.doc());
         App {
             mode: Mode::Reader(reader),
             doc: Some(doc),
@@ -77,6 +85,7 @@ impl App {
             last_tick: Instant::now(),
             save_flash: 0.0,
             theme_index: 0,
+            library,
             search_query: String::new(),
             search_matches: Vec::new(),
             search_idx: 0,
@@ -121,8 +130,20 @@ impl App {
                 let total = pdf.word_count() as usize;
                 DocEnum::Pdf(pdf, PlayerState::new(total, 300))
             }
+            "md" => {
+                let md = match MdDoc::open(path) {
+                    Ok(m) => m,
+                    Err(_) => return,
+                };
+                let total = md.word_count() as usize;
+                DocEnum::Md(md, PlayerState::new(total, 300))
+            }
             _ => return,
         };
+
+        // Add to library
+        let path_str = path.to_string_lossy().to_string();
+        add_to_library(&mut self.library, &path_str, doc.doc());
 
         // Try to restore saved position
         let saved = load_saved_position(path);
@@ -134,7 +155,6 @@ impl App {
             reader.scroll_to_cursor(20);
         }
 
-        MenuState::add_recent(&path.to_string_lossy());
         self.file_path = Some(path.to_string_lossy().to_string());
         self.doc = Some(doc);
         self.mode = Mode::Reader(reader);
@@ -168,32 +188,11 @@ impl App {
                 }
                 _ => return,
             };
-            let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-            let dir = format!("{}/.local/share/volta", home);
-            let _ = std::fs::create_dir_all(&dir);
-            let progress_path = format!("{}/progress.json", dir);
-            let mut data: serde_json::Value = std::fs::read_to_string(&progress_path)
-                .ok()
-                .and_then(|s| serde_json::from_str(&s).ok())
-                .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
-            if let Some(obj) = data.as_object_mut() {
-                let key = self.file_path.as_deref().unwrap_or("unknown");
-                obj.insert(
-                    key.to_string(),
-                    serde_json::json!({
-                        "chapter": chapter,
-                        "cursor_word": cursor_word,
-                        "last_ts": std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_secs(),
-                    }),
-                );
+            if let Some(path) = &self.file_path {
+                self.library
+                    .update_progress(path, chapter as u32, cursor_word);
+                self.library.save();
             }
-            let _ = std::fs::write(
-                &progress_path,
-                serde_json::to_string(&data).unwrap_or_default(),
-            );
             self.save_flash = 1.5;
         }
     }
@@ -278,32 +277,56 @@ impl App {
         self.jump_to_match();
     }
 
-    pub fn render(&self, frame: &mut Frame) {
+    pub fn render(&mut self, frame: &mut Frame) {
         let area = frame.area();
-        let thm = self.active_theme();
-        match &self.mode {
-            Mode::Menu(state) => {
-                state.render(frame, area, thm);
+        let thm_idx = self.theme_index;
+
+        // Extract entries before mutable borrow of mode
+        let menu_entries: Vec<(String, LibraryEntry)> =
+            self.library.entries().iter().map(|(p, e)|
+                (p.to_string(), LibraryEntry {
+                    title: e.title.clone(),
+                    author: e.author.clone(),
+                    format: e.format.clone(),
+                    chapter_count: e.chapter_count,
+                    current_chapter: e.current_chapter,
+                    current_word: e.current_word,
+                    last_opened: e.last_opened,
+                    added: e.added,
+                    cover_path: e.cover_path.clone(),
+                })
+            ).collect();
+        let menu_refs: Vec<(&str, &LibraryEntry)> =
+            menu_entries.iter().map(|(p, e)| (p.as_str(), e)).collect();
+        let search_matches = self.search_matches.clone();
+        let search_idx = self.search_idx;
+        let search_input = self.search_input;
+        let search_query = self.search_query.clone();
+
+        let thm = &theme::THEMES[thm_idx];
+
+        match &mut self.mode {
+            Mode::Menu(ref mut state) => {
+                state.render(frame, area, thm, &menu_refs);
             }
-            Mode::Reader(state) => {
+            Mode::Reader(ref state) => {
                 if let Some(ref doc) = self.doc {
                     state.render(
                         frame,
                         area,
                         thm,
                         doc.doc(),
-                        &self.search_matches,
-                        self.search_idx,
+                        &search_matches,
+                        search_idx,
                     );
                 }
             }
-            Mode::Rsvp(state) => {
+            Mode::Rsvp(ref state) => {
                 if let Some(ref doc) = self.doc {
                     state.render(frame, area, thm, doc.player(), doc.doc());
                 }
             }
         }
-        // Search bar
         if self.search_input {
             let prompt = format!("/{}", self.search_query);
             let style = Style::default().fg(thm.cursor);
@@ -366,7 +389,10 @@ impl App {
         }
 
         let action = match &mut self.mode {
-            Mode::Menu(state) => Action::Menu(MenuAction::from_key(state, key)),
+            Mode::Menu(state) => {
+                let total = self.library.entries().len();
+                Action::Menu(MenuAction::from_key(state, key, total))
+            }
             Mode::Reader(state) => {
                 // Pass search state to reader action dispatch
                 Action::Reader(ReaderAction::from_key(
@@ -390,19 +416,18 @@ impl App {
     fn handle_menu_action(&mut self, action: MenuAction) {
         match action {
             MenuAction::None => {}
-            MenuAction::MoveUp => {
-                if let Mode::Menu(ref mut state) = &mut self.mode {
-                    state.selected = state.selected.saturating_sub(1);
-                }
-            }
-            MenuAction::MoveDown => {
-                if let Mode::Menu(ref mut state) = &mut self.mode {
-                    state.selected = (state.selected + 1).min(state.max_index());
-                }
+            MenuAction::MoveUp
+            | MenuAction::MoveDown
+            | MenuAction::MoveLeft
+            | MenuAction::MoveRight => {
+                // Handled in from_key directly
             }
             MenuAction::Open => {
                 let path = match &self.mode {
-                    Mode::Menu(state) => state.selected_path(),
+                    Mode::Menu(state) => {
+                        let entries = self.library.entries();
+                        state.selected_path(&entries)
+                    }
                     _ => None,
                 };
                 if let Some(p) = path {
@@ -520,6 +545,13 @@ impl App {
             }
             ReaderAction::Quit => {
                 self.should_quit = true;
+            }
+            ReaderAction::BackToMenu => {
+                self.mode = Mode::Menu(MenuState::new());
+                // Clear search state
+                self.search_query.clear();
+                self.search_matches.clear();
+                self.search_input = false;
             }
             ReaderAction::SearchStart => {
                 self.search_input = true;
@@ -647,16 +679,42 @@ enum MenuAction {
     None,
     MoveUp,
     MoveDown,
+    MoveLeft,
+    MoveRight,
     Open,
     Browse,
     Quit,
 }
 
 impl MenuAction {
-    fn from_key(_state: &MenuState, key: KeyEvent) -> Self {
+    fn from_key(state: &mut MenuState, key: KeyEvent, total_entries: usize) -> Self {
         match key.code {
-            KeyCode::Up => MenuAction::MoveUp,
-            KeyCode::Down => MenuAction::MoveDown,
+            KeyCode::Up => {
+                if state.selected_row > 0 {
+                    state.selected_row -= 1;
+                }
+                MenuAction::None
+            }
+            KeyCode::Down => {
+                let max_row = state.max_row(total_entries);
+                if state.selected_row < max_row {
+                    state.selected_row += 1;
+                }
+                MenuAction::None
+            }
+            KeyCode::Left => {
+                if state.selected_col > 0 {
+                    state.selected_col -= 1;
+                }
+                MenuAction::None
+            }
+            KeyCode::Right => {
+                let max_col = state.max_col(total_entries);
+                if state.selected_col < max_col {
+                    state.selected_col += 1;
+                }
+                MenuAction::None
+            }
             KeyCode::Enter => MenuAction::Open,
             KeyCode::Char('o') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 MenuAction::Browse
@@ -684,6 +742,7 @@ enum ReaderAction {
     ThemeNext,
     ThemePrev,
     Quit,
+    BackToMenu,
     SearchStart,
     SearchNext,
     SearchPrev,
@@ -696,6 +755,7 @@ impl ReaderAction {
         }
 
         match key.code {
+            KeyCode::Esc => ReaderAction::BackToMenu,
             KeyCode::Up => ReaderAction::CursorUp,
             KeyCode::Down => ReaderAction::CursorDown,
             KeyCode::Left => ReaderAction::CursorLeft,
@@ -899,6 +959,46 @@ fn cursor_down(state: &mut ReaderState) {
     state.scroll_to_cursor(20);
 }
 
+// ── Library helpers ──
+
+/// Add or update a book in the library from its Document trait.
+fn add_to_library(library: &mut Library, path: &str, doc: &dyn Document) {
+    let format = if path.ends_with(".epub") {
+        "epub"
+    } else if path.ends_with(".pdf") {
+        "pdf"
+    } else if path.ends_with(".md") {
+        "md"
+    } else {
+        return;
+    };
+
+    let title = doc.title().to_string();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    // Extract cover thumbnail (async-friendly — cached on disk)
+    let cover_path = volta_core::cover::extract_cover(path, format);
+
+    library.upsert(
+        path,
+        LibraryEntry {
+            title,
+            author: String::new(),
+            format: format.to_string(),
+            chapter_count: doc.chapter_count(),
+            current_chapter: 0,
+            current_word: 0,
+            last_opened: now,
+            added: now,
+            cover_path,
+        },
+    );
+    library.save();
+}
+
 // ── Event loop ──
 
 pub fn run(mut app: App) -> io::Result<()> {
@@ -931,6 +1031,27 @@ pub fn run(mut app: App) -> io::Result<()> {
         }
 
         terminal.draw(|f| app.render(f))?;
+
+        // Kitty cover images — clear when not in menu, emit when in menu
+        if volta_core::cover::is_kitty() {
+            if let Mode::Menu(_) = &app.mode {
+                let entries = app.library.entries();
+                let size = terminal.size()?;
+                let cols = (size.width.saturating_sub(2) / (CARD_W + 1)).max(1) as usize;
+                for (i, (_path, entry)) in entries.iter().enumerate() {
+                    if let Some(ref cover) = entry.cover_path {
+                        let col = (i % cols) as u16;
+                        let row = (i / cols) as u16;
+                        let card_x = 1 + col * (CARD_W + 1);
+                        let card_y = 1 + row * (CARD_H + 1);
+                        volta_core::cover::kitty_display_image(cover, card_y, card_x, 6, 4);
+                    }
+                }
+            } else {
+                // Clear images when leaving menu mode
+                volta_core::cover::kitty_clear_all();
+            }
+        }
 
         if event::poll(Duration::from_millis(16))? {
             if let Ok(Event::Key(key)) = event::read() {

@@ -21,14 +21,18 @@
 
 // Module visibility: epub & types are `pub` for the test binary;
 // pdf stays private (only used through the DocEnum dispatcher).
+pub mod cover;
 pub mod doc;
 pub mod epub;
+pub mod library;
+pub mod md;
 pub mod pdf;
 pub mod player;
 pub mod types;
 
 use doc::Document;
 use epub::EpubDoc;
+use md::MdDoc;
 use pdf::PdfDoc;
 use player::PlayerState;
 use std::ffi::{CStr, CString};
@@ -45,6 +49,7 @@ use std::path::Path;
 /// through the `Document` trait or `PlayerState`.
 pub enum DocEnum {
     Epub(EpubDoc, PlayerState),
+    Md(MdDoc, PlayerState),
     Pdf(PdfDoc, PlayerState),
 }
 
@@ -53,6 +58,7 @@ impl DocEnum {
     pub fn doc(&self) -> &dyn Document {
         match self {
             DocEnum::Epub(d, _) => d,
+            DocEnum::Md(d, _) => d,
             DocEnum::Pdf(d, _) => d,
         }
     }
@@ -61,6 +67,7 @@ impl DocEnum {
     pub fn player(&self) -> &PlayerState {
         match self {
             DocEnum::Epub(_, p) => p,
+            DocEnum::Md(_, p) => p,
             DocEnum::Pdf(_, p) => p,
         }
     }
@@ -69,6 +76,7 @@ impl DocEnum {
     pub fn player_mut(&mut self) -> &mut PlayerState {
         match self {
             DocEnum::Epub(_, p) => p,
+            DocEnum::Md(_, p) => p,
             DocEnum::Pdf(_, p) => p,
         }
     }
@@ -80,6 +88,7 @@ impl DocEnum {
     fn word_cstring_ptr(&self, i: u32) -> *const c_char {
         match self {
             DocEnum::Epub(d, _) => d.word_cstrings[i as usize].as_ptr(),
+            DocEnum::Md(d, _) => d.word_cstrings[i as usize].as_ptr(),
             DocEnum::Pdf(d, _) => d.word_cstrings[i as usize].as_ptr(),
         }
     }
@@ -87,12 +96,9 @@ impl DocEnum {
     /// Stable C pointer to chapter title `i`.
     fn chapter_title_cstring_ptr(&self, i: u32) -> *const c_char {
         match self {
-            DocEnum::Epub(d, _) => {
-                d.chapter_title_cstrings[i as usize].as_ptr()
-            }
-            DocEnum::Pdf(d, _) => {
-                d.chapter_title_cstrings[i as usize].as_ptr()
-            }
+            DocEnum::Epub(d, _) => d.chapter_title_cstrings[i as usize].as_ptr(),
+            DocEnum::Md(d, _) => d.chapter_title_cstrings[i as usize].as_ptr(),
+            DocEnum::Pdf(d, _) => d.chapter_title_cstrings[i as usize].as_ptr(),
         }
     }
 
@@ -103,9 +109,8 @@ impl DocEnum {
     /// the pointer lives for the DocEnum lifetime (freed on close).
     fn chapter_text_cstring_ptr(&self, i: u32) -> *const c_char {
         match self {
-            DocEnum::Epub(d, _) => {
-                d.chapter_text_cstrings[i as usize].as_ptr()
-            }
+            DocEnum::Epub(d, _) => d.chapter_text_cstrings[i as usize].as_ptr(),
+            DocEnum::Md(d, _) => d.chapter_text_cstrings[i as usize].as_ptr(),
             DocEnum::Pdf(d, _) => {
                 // Build on demand — acceptable because this is called
                 // infrequently (once per chapter switch, not per frame).
@@ -148,6 +153,34 @@ impl DocEnum {
 /// `rsvp_close`.
 ///
 /// The initial PlayerState is created with WPM=300, paused.
+///
+/// Helper: add a book to the library and extract cover.
+fn add_to_library(doc: &dyn Document, path: &Path, format: &str) {
+    use crate::library::{Library, LibraryEntry};
+    let mut library = Library::load();
+    let path_s = path.to_string_lossy();
+    let cover_path = crate::cover::extract_cover(&path_s, format);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    library.upsert(
+        &path_s,
+        LibraryEntry {
+            title: doc.title().to_string(),
+            author: String::new(),
+            format: format.to_string(),
+            chapter_count: doc.chapter_count(),
+            current_chapter: 0,
+            current_word: 0,
+            last_opened: now,
+            added: now,
+            cover_path,
+        },
+    );
+    library.save();
+}
+
 #[no_mangle]
 pub extern "C" fn rsvp_open(path: *const c_char) -> *mut DocEnum {
     // Convert C string → Rust &str, return NULL on invalid UTF-8.
@@ -173,6 +206,7 @@ pub extern "C" fn rsvp_open(path: *const c_char) -> *mut DocEnum {
         "epub" => match EpubDoc::open(path) {
             Ok(doc) => {
                 let total = doc.word_count() as usize;
+                add_to_library(&doc, path, "epub");
                 Ok(DocEnum::Epub(doc, PlayerState::new(total, 300)))
             }
             Err(e) => Err(format!("Failed to open EPUB: {}", e)),
@@ -180,9 +214,18 @@ pub extern "C" fn rsvp_open(path: *const c_char) -> *mut DocEnum {
         "pdf" => match PdfDoc::open(path) {
             Ok(doc) => {
                 let total = doc.word_count() as usize;
+                add_to_library(&doc, path, "pdf");
                 Ok(DocEnum::Pdf(doc, PlayerState::new(total, 300)))
             }
             Err(e) => Err(format!("Failed to open PDF: {}", e)),
+        },
+        "md" => match MdDoc::open(path) {
+            Ok(doc) => {
+                let total = doc.word_count() as usize;
+                add_to_library(&doc, path, "md");
+                Ok(DocEnum::Md(doc, PlayerState::new(total, 300)))
+            }
+            Err(e) => Err(format!("Failed to open MD: {}", e)),
         },
         _ => Err(format!("Unsupported format: .{}", ext)),
     };
@@ -330,6 +373,7 @@ pub extern "C" fn rsvp_render_page(
                 None => std::ptr::null(),
             }
         }
+        DocEnum::Md(_, _) => std::ptr::null(),
         DocEnum::Epub(_, _) => std::ptr::null(),
     }
 }

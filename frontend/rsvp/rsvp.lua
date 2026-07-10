@@ -204,19 +204,6 @@ function M:keypressed(key, scancode, isrepeat)
     book:set_wpm(M.wpm)
   elseif key == kb:get("rsvp_exit") then
     book:pause()
-    -- Save RSVP progress before returning to reader
-    local idx = book:current_index()
-    local ch = book:chapter_at(idx)
-    local ch_start = book:chapter_start(ch)
-    local progress = require("progress")
-    progress:save(book.file_path, {
-      chapter = ch,
-      scroll_y = 0,
-      cursor_word = idx - ch_start,
-      word_index = idx,
-      wpm = M.wpm,
-    })
-    M._save_flash = 1.5
     set_mode("reader")
     require("reader.reader"):enter()
   elseif key == kb:get("rsvp_toggle_stats") then

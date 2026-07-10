@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use volta_core::doc::Document;
 use volta_core::epub::EpubDoc;
+use volta_core::md::MdDoc;
 use volta_core::pdf::PdfDoc;
 use volta_core::player::PlayerState;
 use volta_core::DocEnum;
@@ -52,6 +53,15 @@ fn open_pdf(path: &Path) -> DocEnum {
     DocEnum::Pdf(pdf, PlayerState::new(total, 300))
 }
 
+fn open_md(path: &Path) -> DocEnum {
+    let md = MdDoc::open(path).unwrap_or_else(|e| {
+        eprintln!("Error: {}", e);
+        std::process::exit(1);
+    });
+    let total = md.word_count() as usize;
+    DocEnum::Md(md, PlayerState::new(total, 300))
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
 
@@ -82,9 +92,10 @@ fn main() {
     let doc = match ext.as_str() {
         "epub" => open_epub(path),
         "pdf" => open_pdf(path),
+        "md" => open_md(path),
         _ => {
             eprintln!("Unsupported format: .{}", ext);
-            eprintln!("Supported: .epub, .pdf");
+            eprintln!("Supported: .epub, .pdf, .md");
             std::process::exit(1);
         }
     };
@@ -98,7 +109,6 @@ fn main() {
 
     let mut app = tui::App::new(doc, path_str.clone());
     app.set_position(start_chapter, start_cursor);
-    tui::menu::MenuState::add_recent(&path_str);
 
     if let Err(e) = tui::run(app) {
         eprintln!("TUI error: {}", e);
@@ -113,6 +123,7 @@ fn print_help() {
     eprintln!("  volta-tui                  Open menu");
     eprintln!("  volta-tui <file.epub>     Open EPUB in reader mode");
     eprintln!("  volta-tui <file.pdf>      Open PDF in reader mode");
+    eprintln!("  volta-tui <file.md>       Open Markdown in reader mode");
     eprintln!();
     eprintln!("MENU:");
     eprintln!("  ↑/↓        Navigate items");

@@ -1,199 +1,200 @@
-//! Menu mode — welcome screen with recent files and continue reading.
+//! Library grid — card-based book browser filling the terminal.
 //!
-//! Mirrors the LÖVE `ui/menu.lua`. Shows Volta title, "Continue reading"
-//! for the last book with saved progress, recent files list, and footer.
+//! Cards are arranged in a grid. Arrow keys navigate. Enter opens.
+//! In kitty terminals, cover thumbnails are displayed via the
+//! kitty graphics protocol.
 
 use crate::tui::theme::Theme;
+use volta_core::library::LibraryEntry;
+
 use ratatui::{
     layout::{Alignment, Rect},
     style::{Color, Style},
     text::{Line, Span},
-    widgets::Paragraph,
+    widgets::{Block, Borders, Paragraph},
     Frame,
 };
-use serde::Deserialize;
-use std::collections::HashMap;
-use std::fs;
 use std::path::PathBuf;
 
-/// A single entry in the menu list.
-pub struct MenuEntry {
-    pub path: PathBuf,
-    pub label: String,       // filename
-    pub extra: String,       // e.g. "(Ch. 5)"
-    pub is_continue: bool,   // true = "Continue reading" item
-}
+/// Card dimensions (in terminal cells).
+pub const CARD_W: u16 = 26;
+pub const CARD_H: u16 = 7;
 
 pub struct MenuState {
-    pub entries: Vec<MenuEntry>,
-    pub selected: usize, // 0-based index
-}
-
-/// Saved progress entry matching the Lua progress.json schema.
-#[derive(Deserialize, Default)]
-struct ProgressEntry {
-    cursor_word: Option<usize>,
+    /// Selected card position: (col, row) in the grid.
+    pub selected_col: usize,
+    pub selected_row: usize,
+    /// Grid layout for current terminal size.
+    pub cols: usize,
 }
 
 impl MenuState {
-    /// Load recent files and progress data from ~/.local/share/volta/
-    pub fn load() -> Self {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-        let data_dir = format!("{}/.local/share/volta", home);
-        let recent_path = format!("{}/recent.txt", data_dir);
-        let progress_path = format!("{}/progress.json", data_dir);
-
-        let recent: Vec<String> = fs::read_to_string(&recent_path)
-            .unwrap_or_default()
-            .lines()
-            .filter(|l| !l.is_empty())
-            .map(|l| l.to_string())
-            .collect();
-
-        let progress: HashMap<String, ProgressEntry> =
-            fs::read_to_string(&progress_path)
-                .ok()
-                .and_then(|s| serde_json::from_str(&s).ok())
-                .unwrap_or_default();
-
-        let mut entries = Vec::new();
-
-        // "Continue reading" — first recent file with saved progress
-        if let Some(first) = recent.first() {
-            if let Some(prog) = progress.get(first) {
-                let filename = Self::filename(first);
-                let extra = if let Some(ch) = prog.cursor_word {
-                    format!("(Ch. {})", ch + 1)
-                } else {
-                    String::new()
-                };
-                entries.push(MenuEntry {
-                    path: PathBuf::from(first),
-                    label: filename,
-                    extra,
-                    is_continue: true,
-                });
-            }
-        }
-
-        // Recent files (skip first if it's the continue item)
-        let skip = if entries.is_empty() { 0 } else { 1 };
-        for path_str in recent.iter().skip(skip).take(10) {
-            let filename = Self::filename(path_str);
-            let extra = progress.get(path_str).and_then(|p| p.cursor_word).map_or(
-                String::new(),
-                |ch| format!("(Ch. {})", ch + 1),
-            );
-            entries.push(MenuEntry {
-                path: PathBuf::from(path_str),
-                label: filename,
-                extra,
-                is_continue: false,
-            });
-        }
-
+    pub fn new() -> Self {
         MenuState {
-            entries,
-            selected: 0, // pre-select "Continue reading" if it exists
+            selected_col: 0,
+            selected_row: 0,
+            cols: 1,
         }
     }
 
-    fn filename(path: &str) -> String {
-        std::path::Path::new(path)
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or(path)
-            .to_string()
+    pub fn selected_path(
+        &self,
+        entries: &[(&str, &LibraryEntry)],
+    ) -> Option<PathBuf> {
+        let idx = self.selected_row * self.cols + self.selected_col;
+        entries.get(idx).map(|(path, _)| PathBuf::from(*path))
     }
 
-    /// Render the menu screen.
-    pub fn render(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
-        let w = area.width;
-        let h = area.height;
+    /// Render the full-screen card grid.
+    pub fn render(
+        &mut self,
+        frame: &mut Frame,
+        area: Rect,
+        theme: &Theme,
+        entries: &[(&str, &LibraryEntry)],
+    ) {
+        // Empty state
+        if entries.is_empty() {
+            let msg = Paragraph::new("No books yet.\n\nPress Ctrl+O to browse for a file.")
+                .style(Style::default().fg(theme.text))
+                .alignment(Alignment::Center);
+            frame.render_widget(msg, area);
+            return;
+        }
 
-        // ── Title ──
-        let title = Paragraph::new("Volta")
-            .style(Style::default().fg(theme.heading))
-            .alignment(Alignment::Center);
-        frame.render_widget(title, Rect::new(area.x, area.y + 2, w, 1));
+        // Calculate grid and sync state
+        self.cols = (area.width.saturating_sub(2) / (CARD_W + 1)).max(1) as usize;
 
-        // ── Subtitle ──
-        let subtitle = Paragraph::new("EPUB & PDF reader with RSVP speed reading")
-            .style(Style::default().fg(theme.text))
-            .alignment(Alignment::Center);
-        frame.render_widget(subtitle, Rect::new(area.x, area.y + 3, w, 1));
+        // Render cards
+        for (i, (_path, entry)) in entries.iter().enumerate() {
+            let col = (i % self.cols) as u16;
+            let row = (i / self.cols) as u16;
+            let card_x = area.x + 1 + col * (CARD_W + 1);
+            let card_y = area.y + 1 + row * (CARD_H + 1);
 
-        let mut y = area.y + 6;
-
-        // ── Entries ──
-        for (i, entry) in self.entries.iter().enumerate() {
-            if y >= area.y + h - 2 {
+            let card_area = Rect::new(card_x, card_y, CARD_W, CARD_H);
+            if card_area.y + CARD_H > area.y + area.height {
                 break;
             }
 
-            let is_selected = i == self.selected;
-            let color = if is_selected {
-                theme.cursor
-            } else {
-                theme.text
-            };
+            let is_selected = col as usize == self.selected_col
+                && row as usize == self.selected_row;
 
-            let prefix: String = if entry.is_continue {
-                if is_selected { "> Continue: " } else { "  Continue: " }.to_string()
-            } else {
-                let num = if self.has_continue() { i } else { i + 1 };
-                if is_selected {
-                    format!("> {}. ", num)
-                } else {
-                    format!("  {}. ", num)
-                }
-            };
-
-            let line = if entry.extra.is_empty() {
-                Line::from(Span::styled(
-                    format!("{}{}", prefix, entry.label),
-                    Style::default().fg(color),
-                ))
-            } else {
-                Line::from(vec![
-                    Span::styled(format!("{}{}  ", prefix, entry.label), Style::default().fg(color)),
-                    Span::styled(&entry.extra, Style::default().fg(Color::Gray)),
-                ])
-            };
-
-            frame.render_widget(Paragraph::new(line), Rect::new(area.x + 4, y, w - 4, 1));
-            y += 2;
+            self.render_card(frame, card_area, entry, is_selected, theme);
         }
-
-        // ── Footer instructions ──
-        let footer = Paragraph::new("Enter = open  |  Ctrl+O = browse  |  Esc = quit")
-            .style(Style::default().fg(theme.hud))
-            .alignment(Alignment::Center);
-        frame.render_widget(footer, Rect::new(area.x, area.y + h - 1, w, 1));
     }
 
-    pub fn has_continue(&self) -> bool {
-        self.entries.first().map_or(false, |e| e.is_continue)
+    /// Render a single card.
+    fn render_card(
+        &self,
+        frame: &mut Frame,
+        area: Rect,
+        entry: &LibraryEntry,
+        selected: bool,
+        theme: &Theme,
+    ) {
+        let border_color = if selected {
+            theme.cursor
+        } else {
+            Color::Rgb(60, 60, 60)
+        };
+        let bg = if selected {
+            Color::Rgb(30, 20, 40)
+        } else {
+            Color::Rgb(10, 10, 15)
+        };
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(border_color))
+            .style(Style::default().bg(bg));
+
+        let (icon, fmt_label) = match entry.format.as_str() {
+            "epub" => ("📖", "EPUB"),
+            "pdf" => ("📄", "PDF"),
+            "md" => ("📝", "MD"),
+            _ => ("📘", "?"),
+        };
+
+        let pct = if entry.chapter_count > 0 {
+            (entry.current_chapter as f64 / entry.chapter_count as f64 * 100.0) as u32
+        } else {
+            0
+        };
+        let bar_w = (area.width.saturating_sub(4)) as usize;
+        let filled = (bar_w as f64 * pct as f64 / 100.0) as usize;
+        let empty = bar_w.saturating_sub(filled);
+        let bar = format!("{}{} {}%", "█".repeat(filled), "░".repeat(empty), pct);
+
+        let inner = block.inner(area);
+
+        let header = Line::from(vec![Span::styled(
+            format!("{} {}", icon, fmt_label),
+            Style::default().fg(theme.heading),
+        )]);
+
+        let title = truncate(&entry.title, inner.width.saturating_sub(2) as usize);
+        let title_line = Line::from(Span::styled(
+            title,
+            Style::default().fg(if selected { theme.cursor } else { theme.text }),
+        ));
+
+        let author = if entry.author.is_empty() {
+            "".to_string()
+        } else {
+            truncate(&entry.author, inner.width.saturating_sub(2) as usize)
+        };
+        let author_line = Line::from(Span::styled(author, Style::default().fg(Color::Gray)));
+
+        let bar_line = Line::from(Span::styled(
+            &bar,
+            Style::default().fg(if pct > 0 { theme.cursor } else { Color::Gray }),
+        ));
+
+        let ch_info = if entry.chapter_count > 0 {
+            format!("Ch {}/{}", entry.current_chapter + 1, entry.chapter_count)
+        } else {
+            String::new()
+        };
+        let time_ago = relative_time(entry.last_opened);
+        let footer = Line::from(Span::styled(
+            format!("{}  ·  {}", ch_info, time_ago),
+            Style::default().fg(theme.hud),
+        ));
+
+        let lines = vec![
+            header,
+            Line::from(""),
+            title_line,
+            author_line,
+            bar_line,
+            footer,
+        ];
+
+        let paragraph = Paragraph::new(lines).block(block);
+        frame.render_widget(paragraph, area);
     }
 
-    pub fn selected_path(&self) -> Option<PathBuf> {
-        self.entries.get(self.selected).map(|e| e.path.clone())
+    pub fn max_col(&self, total: usize) -> usize {
+        if total == 0 {
+            return 0;
+        }
+        total.saturating_sub(1) % self.cols
     }
 
-    pub fn max_index(&self) -> usize {
-        self.entries.len().saturating_sub(1)
+    pub fn max_row(&self, total: usize) -> usize {
+        if total == 0 {
+            return 0;
+        }
+        (total.saturating_sub(1)) / self.cols
     }
 
     /// Spawn zenity file picker, return chosen path if any.
     pub fn browse_file() -> Option<PathBuf> {
         let output = std::process::Command::new("zenity")
-            .args(&[
-                "--file-selection",
-                "--title=Open Book",
-            ])
+            .args(&["--file-selection", "--title=Open Book"])
             .output()
             .ok()?;
-
         if output.status.success() {
             let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
             if !path.is_empty() {
@@ -202,25 +203,37 @@ impl MenuState {
         }
         None
     }
+}
 
-    /// Add a path to the top of recent.txt.
-    pub fn add_recent(path: &str) {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-        let data_dir = format!("{}/.local/share/volta", home);
-        let recent_path = format!("{}/recent.txt", data_dir);
+fn truncate(s: &str, max_len: usize) -> String {
+    if s.chars().count() <= max_len {
+        s.to_string()
+    } else {
+        format!(
+            "{}…",
+            s.chars()
+                .take(max_len.saturating_sub(1))
+                .collect::<String>()
+        )
+    }
+}
 
-        let _ = fs::create_dir_all(&data_dir);
+fn relative_time(ts: u64) -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let diff = now.saturating_sub(ts);
 
-        let mut lines: Vec<String> = fs::read_to_string(&recent_path)
-            .unwrap_or_default()
-            .lines()
-            .filter(|l| !l.is_empty() && l != &path)
-            .map(|l| l.to_string())
-            .collect();
-
-        lines.insert(0, path.to_string());
-        lines.truncate(20);
-
-        let _ = fs::write(&recent_path, lines.join("\n") + "\n");
+    if diff < 60 {
+        "just now".to_string()
+    } else if diff < 3600 {
+        format!("{}m ago", diff / 60)
+    } else if diff < 86400 {
+        format!("{}h ago", diff / 3600)
+    } else if diff < 604800 {
+        format!("{}d ago", diff / 86400)
+    } else {
+        "a while ago".to_string()
     }
 }

@@ -69,9 +69,6 @@ function M:enter()
   else
     M.cursor_word = M.line_word_offsets[1] or 0
   end
-
-  -- Save initial position (so even auto-opened books are tracked)
-  M:_save_progress()
 end
 
 --- Reflow chapter text into wrapped lines and track word offsets.
@@ -385,7 +382,6 @@ function M:keypressed(key, scancode, isrepeat)
       M.scroll_y = 0
       M.cursor_word = 0
       M:_reflow()
-      M:_save_progress()
     end
 
   elseif key == kb:get("reader_prev_chapter") then
@@ -394,7 +390,6 @@ function M:keypressed(key, scancode, isrepeat)
       M.scroll_y = 0
       M.cursor_word = 0
       M:_reflow()
-      M:_save_progress()
     end
 
   -- ── Vim gg / G ──
@@ -420,14 +415,12 @@ function M:keypressed(key, scancode, isrepeat)
   -- ── Enter RSVP at cursor position ──
 
   elseif key == kb:get("reader_toggle_rsvp") then
-    M:_save_progress()
     require("rsvp.rsvp"):enter()
     set_mode("rsvp")
 
   -- ── Back to menu ──
 
   elseif key == kb:get("reader_escape") then
-    M:_save_progress()
     set_mode("menu")
 
   -- ── Manual save (Ctrl+S) ──

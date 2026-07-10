@@ -62,14 +62,6 @@ if [ $FORCE_GUI -eq 1 ]; then
     disown
 elif [ -t 0 ]; then
     # Running in a terminal (no --gui) → TUI mode
-    if [ $# -eq 0 ]; then
-        echo "Volta — terminal ebook reader with RSVP speed reading"
-        echo ""
-        echo "Usage: volta <file.epub>"
-        echo "       volta --gui <file.epub>   (GUI mode)"
-        echo "       volta --help              (keybindings)"
-        exit 1
-    fi
     exec "$TUI_BIN" "$@"
 else
     # Running from desktop/launcher (no terminal) → LÖVE GUI mode
