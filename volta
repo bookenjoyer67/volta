@@ -28,6 +28,22 @@ for arg in "$@"; do
 done
 set -- "${ARGS[@]}"
 
+# ── URL download ──
+if [[ "${1:-}" == http://* || "${1:-}" == https://* ]]; then
+    URL="$1"
+    DEST_DIR="${VOLTA_DOWNLOAD_DIR:-$HOME/Downloads}"
+    mkdir -p "$DEST_DIR"
+
+    FILENAME=$(basename "$URL" | sed 's/[?#].*//')
+    [ -n "$FILENAME" ] || FILENAME="downloaded-book"
+
+    DEST="$DEST_DIR/$FILENAME"
+    echo "==> Downloading → $DEST" >&2
+    curl -fL --progress-bar -o "$DEST" "$URL" || { echo "Download failed" >&2; exit 1; }
+
+    set -- "$DEST" "${@:2}"
+fi
+
 # ── Build if needed ──
 NEEDS_BUILD=0
 if [[ ! -f "$TUI_BIN" ]] || [[ ! -f "$FRONTEND/libvolta_core.so" ]]; then
