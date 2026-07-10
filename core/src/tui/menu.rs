@@ -151,24 +151,18 @@ impl MenuState {
             Style::default().fg(if pct > 0 { theme.cursor } else { Color::Gray }),
         ));
 
-        let lines = vec![
-            header,
-            Line::from(""),
-            title_line,
-            author_line,
-            bar_line,
-           
-        ];
+        let lines = vec![header, Line::from(""), title_line, author_line, bar_line];
 
         let paragraph = Paragraph::new(lines).block(block);
         frame.render_widget(paragraph, area);
     }
 
-    pub fn max_col(&self, total: usize) -> usize {
+    pub fn max_col(&self, total: usize, row: usize) -> usize {
         if total == 0 {
             return 0;
         }
-        total.saturating_sub(1) % self.cols
+        let remaining = total.saturating_sub(row * self.cols).min(self.cols);
+        remaining.saturating_sub(1)
     }
 
     pub fn max_row(&self, total: usize) -> usize {

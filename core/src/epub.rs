@@ -189,10 +189,6 @@ impl EpubDoc {
             });
 
             ci += 1;
-            // Progress log every 10 chapters for large books
-            if ci % 10 == 0 {
-                eprintln!("  Chapter {} ({} words)", ci, words.len());
-            }
         }
 
         // --- pre-build CStrings for FFI ---
@@ -208,12 +204,6 @@ impl EpubDoc {
             .iter()
             .map(|c| CString::new(c.text.as_str()).unwrap_or_default())
             .collect();
-
-        eprintln!(
-            "EPUB loaded: {} words in {} chapters",
-            words.len(),
-            chapters.len()
-        );
 
         Ok(EpubDoc {
             metadata,

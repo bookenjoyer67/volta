@@ -458,6 +458,32 @@ impl App {
             MenuAction::Quit => {
                 self.should_quit = true;
             }
+            MenuAction::Delete => {
+                let path = match &self.mode {
+                    Mode::Menu(state) => {
+                        let entries = self.library.entries();
+                        state.selected_path(&entries)
+                            .map(|p| p.to_string_lossy().to_string())
+                    }
+                    _ => None,
+                };
+                if let Some(p) = path {
+                    self.library.remove(&p);
+                    self.library.save();
+                    // clamp selection after removal
+                    if let Mode::Menu(ref mut state) = &mut self.mode {
+                        let total = self.library.entries().len();
+                        let max_row = if total > 0 { state.max_row(total) } else { 0 };
+                        if state.selected_row > max_row {
+                            state.selected_row = max_row;
+                        }
+                        let max_col = if total > 0 { state.max_col(total, state.selected_row) } else { 0 };
+                        if state.selected_col > max_col {
+                            state.selected_col = max_col;
+                        }
+                    }
+                }
+            }
         }
     }
 

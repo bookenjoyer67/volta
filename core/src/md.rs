@@ -102,12 +102,6 @@ impl MdDoc {
             .map(|t| CString::new(t.as_str()).unwrap_or_default())
             .collect();
 
-        eprintln!(
-            "MD loaded: {} chapters, {} words",
-            chapter_texts.len(),
-            words.len()
-        );
-
         Ok(MdDoc {
             file_path,
             words,

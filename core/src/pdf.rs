@@ -100,12 +100,6 @@ impl PdfDoc {
             .map(|t| CString::new(t.as_str()).unwrap_or_default())
             .collect();
 
-        eprintln!(
-            "PDF loaded: {} pages, {} words",
-            chapter_texts.len(),
-            words.len()
-        );
-
         Ok(PdfDoc {
             file_path,
             page_count,

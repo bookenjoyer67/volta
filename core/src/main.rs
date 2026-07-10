@@ -23,16 +23,12 @@ struct SavedProgress {
 fn load_progress(path: &str) -> Option<SavedProgress> {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
     let progress_file = format!("{}/.local/share/volta/progress.json", home);
-    eprintln!("[volta] Loading progress from {} for key {}", progress_file, path);
     let mut data: HashMap<String, SavedProgress> =
         std::fs::read_to_string(&progress_file)
             .ok()
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or_default();
-    eprintln!("[volta] Loaded {} entries. Keys: {:?}", data.len(), data.keys().collect::<Vec<_>>());
-    let result = data.remove(path);
-    eprintln!("[volta] Found entry for '{}': {:?}", path, result.as_ref().map(|s| (s.chapter, s.cursor_word)));
-    result
+    data.remove(path)
 }
 
 fn open_epub(path: &Path) -> DocEnum {

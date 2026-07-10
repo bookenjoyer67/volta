@@ -99,6 +99,12 @@ impl Library {
         }
     }
 
+    /// Remove an entry from the library.
+    pub fn remove(&mut self, path: &str) {
+        self.order.retain(|p| p != path);
+        self.map.remove(path);
+    }
+
     pub fn save(&self) {
         // Rebuild serialization map in order
         let ordered: serde_json::Map<String, serde_json::Value> = self

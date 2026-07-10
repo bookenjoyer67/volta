@@ -236,6 +236,7 @@ pub enum MenuAction {
     None,
     Open,
     Browse,
+    Delete,
     Quit,
 }
 
@@ -262,7 +263,7 @@ impl MenuAction {
                 MenuAction::None
             }
             KeyCode::Right => {
-                let max_col = state.max_col(total_entries);
+                let max_col = state.max_col(total_entries, state.selected_row);
                 if state.selected_col < max_col {
                     state.selected_col += 1;
                 }
@@ -273,6 +274,7 @@ impl MenuAction {
                 MenuAction::Browse
             }
             KeyCode::Esc | KeyCode::Char('q') => MenuAction::Quit,
+            KeyCode::Delete => MenuAction::Delete,
             _ => MenuAction::None,
         }
     }
