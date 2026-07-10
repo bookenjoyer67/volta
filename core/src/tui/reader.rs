@@ -172,6 +172,55 @@ impl ReaderState {
 
         frame.render_widget(Paragraph::new(lines), text_area);
 
+        // Scrollbar on right edge
+        let sb_x = area.x + area.width.saturating_sub(2);
+        let sb_h = text_area.height.saturating_sub(0) as usize;
+        if sb_h > 0 && area.width > 20 {
+            let max_scroll = self.wrapped_lines.len().saturating_sub(1).max(1);
+            let thumb_h = ((sb_h as f64) * (sb_h as f64 / max_scroll as f64)).max(1.0) as usize;
+            let thumb_y = if max_scroll > 1 {
+                ((self.scroll as f64 / max_scroll as f64) * (sb_h - thumb_h) as f64) as u16
+            } else {
+                0
+            };
+
+            // Track (dim)
+            for row in 0..sb_h as u16 {
+                let y = text_area.y + row;
+                if y < area.y + area.height {
+                    frame.buffer_mut()
+                        .get_mut(sb_x, y)
+                        .set_char('│')
+                        .set_fg(Color::Rgb(30, 30, 45))
+                        .set_bg(Color::Reset);
+                }
+            }
+
+            // Thumb (accent)
+            for row in 0..thumb_h as u16 {
+                let y = text_area.y + thumb_y + row;
+                if y < area.y + area.height {
+                    let cell = frame.buffer_mut().get_mut(sb_x, y);
+                    cell.set_char('█').set_fg(theme.cursor).set_bg(Color::Reset);
+                }
+            }
+
+            // Global position dot
+            let total_ch = doc.chapter_count() as usize;
+            if total_ch > 0 && max_scroll > 0 {
+                let ch_ratio = self.chapter as f64 / total_ch as f64;
+                let scroll_ratio = self.scroll as f64 / max_scroll as f64;
+                let global_pct = ch_ratio + scroll_ratio / total_ch as f64;
+                let dot_y = text_area.y + (global_pct * sb_h as f64) as u16;
+                if dot_y < area.y + area.height {
+                    let cell = frame.buffer_mut().get_mut(sb_x.saturating_sub(1), dot_y);
+                    cell.set_char('·')
+                        .set_fg(Color::Rgb(80, 80, 120))
+                        .set_bg(Color::Reset);
+                }
+            }
+        }
+
         // Status bar
         let visible = visible_height;
         let pages = (self
