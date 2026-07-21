@@ -146,20 +146,68 @@ impl EpubDoc {
                 }
             };
 
+            // Strip HTML comments first (MS Office conditional comments
+            // like <!--[if gte mso]>...<![endif]-->> carry metadata junk).
+            let raw_text: std::borrow::Cow<str> = if raw_text.contains("<!--") {
+                let mut stripped = String::with_capacity(raw_text.len());
+                let mut rest = raw_text;
+                while let Some(start) = rest.find("<!--") {
+                    stripped.push_str(&rest[..start]);
+                    rest = match rest[start..].find("-->") {
+                        Some(end) => &rest[start + end + 3..],
+                        None => "",
+                    };
+                }
+                stripped.push_str(rest);
+                stripped.into()
+            } else {
+                raw_text.into()
+            };
+
             // --- HTML stripping ---
-            // Simple character-level state machine: everything between
-            // '<' and '>' is discarded.  Does NOT handle CDATA, comments,
+            // Character-level state machine: tag contents are captured so
+            // block-level closing tags (</p>, </div>, headings, <br>, ...)
+            // can emit paragraph breaks. Does NOT handle CDATA, comments,
             // or script/style blocks — assume EPUB content is clean XHTML.
+            const BLOCK_TAGS: &[&str] = &[
+                "/p", "/div", "/h1", "/h2", "/h3", "/h4", "/h5", "/h6", "/li",
+                "/blockquote", "/section", "/article", "/tr", "br", "br/",
+                "hr", "hr/",
+            ];
             let mut clean_text = String::new();
             let mut in_tag = false;
+            let mut tag_buf = String::new();
+            // Content of these blocks is code, not prose — drop it entirely.
+            let mut skip_block: Option<&'static str> = None;
             for ch in raw_text.chars() {
                 match ch {
-                    '<' => in_tag = true,
-                    '>' => in_tag = false,
-                    _ if !in_tag => {
-                        clean_text.push(ch);
+                    '<' => {
+                        in_tag = true;
+                        tag_buf.clear();
                     }
-                    _ => {}
+                    '>' => {
+                        in_tag = false;
+                        let name = tag_buf.trim().to_ascii_lowercase();
+                        let name = name.split_whitespace().next().unwrap_or("");
+                        match name {
+                            "style" => skip_block = Some("/style"),
+                            "script" => skip_block = Some("/script"),
+                            _ => {}
+                        }
+                        if Some(name) == skip_block {
+                            skip_block = None;
+                            continue;
+                        }
+                        if skip_block.is_none() && BLOCK_TAGS.contains(&name) {
+                            clean_text.push_str("\n\n");
+                        }
+                    }
+                    _ if in_tag => tag_buf.push(ch),
+                    _ => {
+                        if skip_block.is_none() {
+                            clean_text.push(ch);
+                        }
+                    }
                 }
             }
 
@@ -168,11 +216,15 @@ impl EpubDoc {
             // &#8211; → – (en dash), &mdash; → —, &ldquo; → ", etc.
             let clean_text = Self::decode_entities(&clean_text);
 
-            // Collapse runs of whitespace into single spaces.
+            // Paragraph-aware whitespace normalization:
+            // within a paragraph collapse all whitespace runs to a single
+            // space; preserve exactly one blank line between paragraphs.
             let clean_text = clean_text
-                .split_whitespace()
+                .split("\n\n")
+                .map(|p| p.split_whitespace().collect::<Vec<_>>().join(" "))
+                .filter(|p| !p.is_empty())
                 .collect::<Vec<_>>()
-                .join(" ");
+                .join("\n\n");
 
             // --- word tokenization ---
             // Each word is tagged with its chapter index so

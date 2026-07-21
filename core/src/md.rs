@@ -81,7 +81,16 @@ impl MdDoc {
         let mut chapter_texts = Vec::new();
 
         for (ci, (_title, text)) in chapters.iter().enumerate() {
-            let trimmed = text.trim().to_string();
+            // Paragraph-aware normalize: collapse single newlines
+            // (CommonMark soft breaks) to spaces within a paragraph,
+            // collapse 3+ newlines to one blank line between paragraphs.
+            let trimmed = text
+                .trim()
+                .split("\n\n")
+                .map(|p| p.split_whitespace().collect::<Vec<_>>().join(" "))
+                .filter(|p| !p.is_empty())
+                .collect::<Vec<_>>()
+                .join("\n\n");
             for w in trimmed.split_whitespace() {
                 words.push(Word::new(w.to_string(), ci as u32));
             }
