@@ -47,6 +47,12 @@ M.defaults = {
   reader_search_next = "n",
   reader_search_prev = "N",
 
+  -- Layout: margins and max column width
+  reader_margin_narrow = "<",
+  reader_margin_wide = ">",
+  reader_col_narrow = "{",
+  reader_col_wide = "}",
+
   -- RSVP mode
   rsvp_play_pause = "space",
   rsvp_seek_back_10 = "left",

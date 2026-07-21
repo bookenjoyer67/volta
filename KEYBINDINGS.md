@@ -34,7 +34,13 @@
 || `Ctrl+o` | Jump back to previous position (undo TOC/search jump) |
 || `/` | Start search — type your query, Enter to execute, Esc to cancel |
 || `Ctrl+S` | **Save progress** (does not auto-save!) |
+|| `<` / `>` | Narrow / widen page margins |
+|| `{` / `}` | Narrow / widen max column width (text centers when set; narrow past the floor to turn off) |
 || `Esc` | Clear search / Return to library |
+
+### Paragraphs
+
+Paragraph breaks are preserved from the source (EPUB block tags, Markdown blank lines). The first line of every paragraph is indented; continuation lines are flush left. PDF text has no paragraph structure, so PDFs render as before.
 
 ### Scrollbar
 

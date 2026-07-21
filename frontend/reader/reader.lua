@@ -21,6 +21,8 @@ M.current_chapter = 0
 M.line_height = 0
 M.font_size = 18
 M.margin = 60
+M.max_col_width = 0   -- px; 0 = fill available width
+M._origin_x = 60      -- computed in _reflow (margin + centering offset)
 M._header_h = 52  -- header bar height, used in scroll calculations
 M.wrapped_lines = {}
 
@@ -97,45 +99,61 @@ function M:_reflow()
     return
   end
 
-  local max_width = love.graphics.getWidth() - M.margin * 2
+  local avail = love.graphics.getWidth() - M.margin * 2
+  local max_width = (M.max_col_width > 0)
+    and math.min(avail, M.max_col_width) or avail
+  M._origin_x = M.margin + math.max(0, (avail - max_width) / 2)
   local space_w = M.font:getWidth(" ")
+  local indent = "    "
+  local indent_w = M.font:getWidth(indent)
   M.wrapped_lines = {}
   M.line_word_offsets = {}
   M._line_word_x = {}
 
-  local current_line = ""
   local word_idx = 0  -- counter through the chapter's words
-  local line_start_word = 0  -- word index where current line started
-  local current_x = 0  -- x-offset for next word on this line
-  local line_word_x = {}  -- x-offsets for words on current line
 
-  for word in text:gmatch("%S+") do
-    local word_w = M.font:getWidth(word)
-    local test = current_line == "" and word or current_line .. " " .. word
+  -- Paragraph-aware wrap: split on blank lines, indent each
+  -- paragraph's first line.  Word indices never count the indent,
+  -- so search offsets and RSVP entry points are unaffected.
+  for paragraph in (text .. "\n\n"):gmatch("(.-)\n\n") do
+    local current_line = ""
+    local line_start_word = word_idx
+    local current_x = indent_w  -- first line starts after the indent
+    local line_word_x = {}
+    local first_line = true
 
-    if M.font:getWidth(test) > max_width then
-      -- Line is full — commit it with x-offsets
-      table.insert(M.wrapped_lines, current_line)
-      table.insert(M.line_word_offsets, line_start_word)
-      table.insert(M._line_word_x, line_word_x)
-      current_line = word
-      line_start_word = word_idx
-      current_x = word_w + space_w
-      line_word_x = {0}
-    else
-      table.insert(line_word_x, current_x)
-      current_line = test
-      current_x = current_x + word_w + space_w
+    for word in paragraph:gmatch("%S+") do
+      local word_w = M.font:getWidth(word)
+      local test = current_line == "" and word or current_line .. " " .. word
+      local capacity = first_line and (max_width - indent_w) or max_width
+
+      if M.font:getWidth(test) > capacity and current_line ~= "" then
+        -- Line is full — commit it with x-offsets
+        table.insert(M.wrapped_lines,
+          first_line and (indent .. current_line) or current_line)
+        table.insert(M.line_word_offsets, line_start_word)
+        table.insert(M._line_word_x, line_word_x)
+        current_line = word
+        line_start_word = word_idx
+        current_x = word_w + space_w
+        line_word_x = {0}
+        first_line = false
+      else
+        table.insert(line_word_x, current_x)
+        current_line = test
+        current_x = current_x + word_w + space_w
+      end
+
+      word_idx = word_idx + 1
     end
 
-    word_idx = word_idx + 1
-  end
-
-  -- Commit the last line
-  if current_line ~= "" then
-    table.insert(M.wrapped_lines, current_line)
-    table.insert(M.line_word_offsets, line_start_word)
-    table.insert(M._line_word_x, line_word_x)
+    -- Commit the paragraph's last line
+    if current_line ~= "" then
+      table.insert(M.wrapped_lines,
+        first_line and (indent .. current_line) or current_line)
+      table.insert(M.line_word_offsets, line_start_word)
+      table.insert(M._line_word_x, line_word_x)
+    end
   end
 
   -- Clamp cursor to valid range for this chapter
@@ -348,7 +366,8 @@ function M:draw()
     if ly + M.line_height > 0 and ly < h then
       if M.has_matches then
         -- Word-by-word rendering with match highlighting
-        local x = M.margin
+        local lead = line:match("^%s*")
+        local x = M._origin_x + M.font:getWidth(lead)
         local first_word = M.line_word_offsets[i] or 0
         local word_idx = 0
         for word in line:gmatch("%S+") do
@@ -374,7 +393,7 @@ function M:draw()
         end
       else
         love.graphics.setColor(unpack(theme.text))
-        love.graphics.print(line, M.margin, ly)
+        love.graphics.print(line, M._origin_x, ly)
       end
     end
   end
@@ -403,7 +422,7 @@ function M:draw()
         local cursor_color = theme.cursor or {1, 0.41, 0.71, 0.35}
         love.graphics.setColor(unpack(cursor_color))
         love.graphics.rectangle("fill",
-          M.margin + word_x - 2, cursor_y,
+          M._origin_x + word_x - 2, cursor_y,
           word_width + 4, M.line_height)
       end
     end
@@ -728,6 +747,30 @@ function M:keypressed(key, scancode, isrepeat)
     M:init()
     M:_reflow()
     love.graphics.setBackgroundColor(unpack(config.theme.reader.bg))
+
+  -- ── Layout: margins and max column width ──
+
+  elseif key == kb:get("reader_margin_narrow") then
+    M.margin = math.max(0, M.margin - 10)
+    M:_reflow()
+
+  elseif key == kb:get("reader_margin_wide") then
+    M.margin = math.min(400, M.margin + 10)
+    M:_reflow()
+
+  elseif key == kb:get("reader_col_narrow") then
+    if M.max_col_width > 0 then
+      local next_w = M.max_col_width - 40
+      -- Below a readable floor, turn the limit off
+      M.max_col_width = next_w < 400 and 0 or next_w
+      M:_reflow()
+    end
+
+  elseif key == kb:get("reader_col_wide") then
+    -- Off -> start at a readable measure
+    M.max_col_width = M.max_col_width == 0 and 800
+      or math.min(1600, M.max_col_width + 40)
+    M:_reflow()
 
   end
 end
