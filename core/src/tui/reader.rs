@@ -14,6 +14,7 @@ use ratatui::{
 };
 use std::collections::HashSet;
 use std::time::Instant;
+use unicode_width::UnicodeWidthStr;
 use volta_core::doc::Document;
 
 pub struct ReaderState {
@@ -23,6 +24,16 @@ pub struct ReaderState {
     pub wrapped_lines: Vec<String>,
     pub line_word_offsets: Vec<usize>,
     pub gg_timer: Option<Instant>,
+    /// Columns of margin on each side of the text.
+    pub margin: u16,
+    /// Max text column width (0 = fill available width). Centered when set.
+    pub max_col_width: u16,
+    /// Width the text was last reflowed to (for centering in render).
+    pub content_width: u16,
+    /// Visible text rows at the last render — used by scroll_to_cursor.
+    pub last_visible_height: usize,
+    /// Inputs of the last reflow: (chapter, width, margin, max_col_width).
+    reflow_key: Option<(usize, u16, u16, u16)>,
 }
 
 impl ReaderState {
@@ -35,39 +46,61 @@ impl ReaderState {
             wrapped_lines: Vec::new(),
             line_word_offsets: Vec::new(),
             gg_timer: None,
+            margin: 2,
+            max_col_width: 0,
+            content_width: 0,
+            last_visible_height: 20,
+            reflow_key: None,
         };
         state.reflow(doc, 80);
         state
     }
 
+    /// Reflow only if the reflow inputs changed since last time.
+    /// Returns true if a reflow happened.
+    pub fn reflow_if_needed(&mut self, doc: &dyn Document, width: u16) -> bool {
+        let key = (self.chapter, width, self.margin, self.max_col_width);
+        if self.reflow_key == Some(key) {
+            return false;
+        }
+        self.reflow(doc, width);
+        true
+    }
+
     /// Re-wrap the current chapter to fit `width` columns.
     pub fn reflow(&mut self, doc: &dyn Document, width: u16) {
         let text = doc.chapter_text(self.chapter as u32);
-        let max_width = width.saturating_sub(2) as usize; // margin
-        let (lines, offsets) = wrap_text(text, max_width);
+        let avail = width.saturating_sub(2 * self.margin);
+        let max_width = if self.max_col_width > 0 {
+            avail.min(self.max_col_width)
+        } else {
+            avail
+        };
+        self.content_width = max_width;
+        self.reflow_key = Some((self.chapter, width, self.margin, self.max_col_width));
+        let (lines, offsets) = wrap_text(text, max_width as usize);
         self.wrapped_lines = lines;
         self.line_word_offsets = offsets;
 
         // Clamp cursor
         let max_word = self.line_word_offsets.last().copied().unwrap_or(0);
         self.cursor_word = self.cursor_word.min(max_word);
-        self.scroll_to_cursor(width);
+        self.scroll_to_cursor();
     }
 
     /// Find which wrapped line contains cursor_word.
+    /// Offsets are ascending, so binary-search for the last offset
+    /// that is <= cursor_word.
     pub fn cursor_line(&self) -> usize {
-        for i in (0..self.line_word_offsets.len()).rev() {
-            if self.line_word_offsets[i] <= self.cursor_word {
-                return i;
-            }
-        }
-        0
+        self.line_word_offsets
+            .partition_point(|&o| o <= self.cursor_word)
+            .saturating_sub(1)
     }
 
     /// Adjust scroll so the cursor line is visible.
-    pub fn scroll_to_cursor(&mut self, _height: u16) {
+    pub fn scroll_to_cursor(&mut self) {
         let line = self.cursor_line();
-        let visible_height = 20usize; // rough; refined during render
+        let visible_height = self.last_visible_height.max(1);
         if line < self.scroll {
             self.scroll = line.saturating_sub(1);
         } else if line >= self.scroll + visible_height {
@@ -77,7 +110,7 @@ impl ReaderState {
 
     /// Draw the reader view.
     pub fn render(
-        &self,
+        &mut self,
         frame: &mut Frame,
         area: Rect,
         theme: &Theme,
@@ -86,6 +119,7 @@ impl ReaderState {
         search_idx: usize,
     ) {
         let visible_height = area.height.saturating_sub(4) as usize; // title + status bars
+        self.last_visible_height = visible_height;
 
         // Build set of (ch, word_offset) match positions in the current chapter
         let match_set: HashSet<usize> = search_matches
@@ -108,11 +142,17 @@ impl ReaderState {
             Rect::new(area.x, area.y, area.width, 1),
         );
 
-        // Text area
+        // Text area (centered when a max column width is set)
+        let text_w = if self.content_width > 0 && self.content_width < area.width {
+            self.content_width
+        } else {
+            area.width
+        };
+        let text_x = area.x + (area.width.saturating_sub(text_w)) / 2;
         let text_area = Rect::new(
-            area.x,
+            text_x,
             area.y + 1,
-            area.width,
+            text_w,
             area.height.saturating_sub(3),
         );
         let mut lines: Vec<Line> = Vec::new();
@@ -128,6 +168,13 @@ impl ReaderState {
             let first_word = self.line_word_offsets[i];
             let mut spans = Vec::new();
             let mut byte_pos = 0;
+
+            // Preserve leading whitespace (paragraph indent) as a raw span
+            let lead = line_text.len() - line_text.trim_start().len();
+            if lead > 0 {
+                spans.push(Span::raw(&line_text[..lead]));
+                byte_pos = lead;
+            }
 
             for (wi, word) in words.iter().enumerate() {
                 let global_word = first_word + wi;
@@ -228,23 +275,31 @@ impl ReaderState {
             .saturating_add(visible.saturating_sub(1)))
             / visible.max(1);
         let current_page = (self.scroll / visible.max(1)) + 1;
+        let chapter_pct = {
+            let total = self.line_word_offsets.last().copied().unwrap_or(0);
+            if total > 0 {
+                (self.cursor_word * 100) / total
+            } else {
+                100
+            }
+        };
 
         let status = if !search_matches.is_empty() {
             format!(
-                "Match {}/{}  |  Page {}/{}  |  Word {}  |  {}  |  n/N next/prev  Esc clear",
+                "Match {}/{}  |  Page {}/{}  |  {}%  |  {}  |  n/N next/prev  Esc clear",
                 search_idx + 1,
                 search_matches.len(),
                 current_page.min(pages.max(1)),
                 pages.max(1),
-                self.cursor_word + 1,
+                chapter_pct,
                 theme.name,
             )
         } else {
             format!(
-                "Page {}/{}  |  Word {}  |  {}  |  / search  n/p chapter  j/k scroll  r RSVP",
+                "Page {}/{}  |  {}%  |  {}  |  / search  n/p chapter  j/k scroll  r RSVP  <>/{{}} width",
                 current_page.min(pages.max(1)),
                 pages.max(1),
-                self.cursor_word + 1,
+                chapter_pct,
                 theme.name,
             )
         };
@@ -256,39 +311,69 @@ impl ReaderState {
     }
 }
 
-/// Wrap text to fit `max_width` columns (in bytes — good enough for
-/// ASCII-heavy prose; CJK would need grapheme-aware wrapping).
+/// Wrap text to fit `max_width` display columns. Paragraph-aware:
+/// splits on blank lines and indents the first line of every paragraph
+/// by 4 columns. Widths are measured in display columns via
+/// unicode-width (CJK/emoji take 2 columns), not bytes.
 /// Returns (lines, word_offsets) where word_offsets[i] is the index
 /// of the first word on line i.
+const INDENT: usize = 4;
+
 fn wrap_text(text: &str, max_width: usize) -> (Vec<String>, Vec<usize>) {
     let mut lines: Vec<String> = Vec::new();
     let mut offsets: Vec<usize> = Vec::new();
-    let mut current = String::new();
     let mut word_idx = 0usize;
-    let mut line_start = 0usize;
 
-    for word in text.split_whitespace() {
-        let test = if current.is_empty() {
-            word.to_string()
-        } else {
-            format!("{} {}", current, word)
-        };
+    for paragraph in text.split("\n\n") {
+        let mut current = String::new();
+        let mut line_start = word_idx;
+        let mut first_line = true;
 
-        if test.len() > max_width && !current.is_empty() {
-            lines.push(std::mem::take(&mut current));
-            offsets.push(line_start);
-            current = word.to_string();
-            line_start = word_idx;
-        } else {
-            current = test;
+        for word in paragraph.split_whitespace() {
+            // First line of a paragraph reserves room for the indent.
+            let capacity = if first_line {
+                max_width.saturating_sub(INDENT)
+            } else {
+                max_width
+            };
+            let test = if current.is_empty() {
+                word.to_string()
+            } else {
+                format!("{} {}", current, word)
+            };
+
+            if UnicodeWidthStr::width(test.as_str()) > capacity && !current.is_empty() {
+                if first_line {
+                    let mut indented = String::with_capacity(INDENT + current.len());
+                    indented.push_str("    ");
+                    indented.push_str(&current);
+                    lines.push(indented);
+                } else {
+                    lines.push(current.clone());
+                }
+                offsets.push(line_start);
+                current.clear();
+                first_line = false;
+                line_start = word_idx;
+                current.push_str(word);
+            } else {
+                current = test;
+            }
+
+            word_idx += 1;
         }
 
-        word_idx += 1;
-    }
-
-    if !current.is_empty() {
-        lines.push(current);
-        offsets.push(line_start);
+        if !current.is_empty() {
+            if first_line {
+                let mut indented = String::with_capacity(INDENT + current.len());
+                indented.push_str("    ");
+                indented.push_str(&current);
+                lines.push(indented);
+            } else {
+                lines.push(current);
+            }
+            offsets.push(line_start);
+        }
     }
 
     // Ensure we always have at least one line
@@ -298,4 +383,60 @@ fn wrap_text(text: &str, max_width: usize) -> (Vec<String>, Vec<usize>) {
     }
 
     (lines, offsets)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::wrap_text;
+
+    #[test]
+    fn paragraphs_are_indented_and_offsets_track_words() {
+        let text = "alpha beta gamma delta epsilon zeta eta theta\n\nsecond para starts here with more words to wrap around";
+        let (lines, offsets) = wrap_text(text, 30);
+
+        // Every paragraph's first line starts with the 4-col indent
+        assert!(lines[0].starts_with("    alpha"), "first line: {:?}", lines[0]);
+
+        // Find the first line of paragraph 2: "second" is word idx 8
+        let p2_line = offsets.iter().position(|&o| o == 8).expect("no line starts at word 8");
+        assert!(lines[p2_line].starts_with("    second"), "p2 line: {:?}", lines[p2_line]);
+
+        // Continuation lines are NOT indented
+        for (i, line) in lines.iter().enumerate() {
+            let is_para_start = i == 0 || i == p2_line;
+            if !is_para_start {
+                assert!(!line.starts_with("    "), "continuation line indented: {:?}", line);
+            }
+        }
+
+        // Word offsets are contiguous and cover all words (indent counted nowhere)
+        let total_words = text.split_whitespace().count();
+        let covered: usize = lines.iter().map(|l| l.split_whitespace().count()).sum();
+        assert_eq!(covered, total_words);
+    }
+
+    #[test]
+    fn single_paragraph_still_indents() {
+        let (lines, offsets) = wrap_text("one two three", 80);
+        assert_eq!(lines, vec!["    one two three"]);
+        assert_eq!(offsets, vec![0]);
+    }
+
+    #[test]
+    fn empty_text_yields_one_empty_line() {
+        let (lines, offsets) = wrap_text("", 80);
+        assert_eq!(lines.len(), 1);
+        assert_eq!(offsets, vec![0]);
+    }
+
+    #[test]
+    fn cjk_width_counts_display_columns_not_bytes() {
+        // Each CJK char is 2 display columns but 3 bytes.
+        // With width 8 and a 4-col indent on the first line, only
+        // two chars (4 cols) fit on line 1; the rest wrap.
+        let text = "一 二 三 四";
+        let (lines, _) = wrap_text(text, 9);
+        assert_eq!(lines[0], "    一 二"); // 4 indent + 5 cols = 9
+        assert_eq!(lines[1], "三 四"); // 5 cols <= 9
+    }
 }

@@ -55,6 +55,10 @@ pub struct App {
     pub search_idx: usize,
     pub search_input: bool, // true = typing search query
     pub jump_stack: Vec<(usize, usize)>, // (chapter, cursor_word) for Ctrl+o back
+    /// Redraw only when something changed (events, RSVP ticks, save flash).
+    pub needs_draw: bool,
+    /// Kitty covers: true = emitted for the current menu view.
+    pub kitty_covers_shown: bool,
 }
 
 impl App {
@@ -75,6 +79,8 @@ impl App {
             search_idx: 0,
             search_input: false,
             jump_stack: Vec::new(),
+            needs_draw: true,
+            kitty_covers_shown: false,
         }
     }
 
@@ -98,6 +104,8 @@ impl App {
             search_idx: 0,
             search_input: false,
             jump_stack: Vec::new(),
+            needs_draw: true,
+            kitty_covers_shown: false,
         }
     }
 
@@ -108,7 +116,7 @@ impl App {
                 let count = doc.doc().chapter_count() as usize;
                 state.chapter = chapter.min(count.saturating_sub(1));
                 state.cursor_word = cursor_word;
-                state.scroll_to_cursor(20);
+                state.scroll_to_cursor();
             }
         }
     }
@@ -162,7 +170,7 @@ impl App {
             if ch > 0 || cw > 0 {
                 reader.chapter = ch.min(count.saturating_sub(1));
                 reader.cursor_word = cw;
-                reader.scroll_to_cursor(20);
+                reader.scroll_to_cursor();
             }
         }
 
@@ -178,11 +186,15 @@ impl App {
                 let dt_ms = (now - self.last_tick).as_millis() as f64;
                 self.last_tick = now;
                 doc.player_mut().tick(dt_ms);
+                if doc.player().is_playing() {
+                    self.needs_draw = true;
+                }
             }
         }
         // Count down save flash
         if self.save_flash > 0.0 {
             self.save_flash = (self.save_flash - 0.016).max(0.0);
+            self.needs_draw = true;
         }
     }
 
@@ -247,11 +259,16 @@ impl App {
             let text = doc.chapter_text(ch);
             let lower = text.to_lowercase();
 
+            // Single pass: collect word start byte offsets, then map each
+            // match position to a word index via binary search. The word
+            // offset of a match at byte p = number of word starts < p
+            // (identical to the old split_whitespace().count() semantics).
+            let word_starts: Vec<usize> = word_byte_starts(text);
+
             let mut char_pos = 0;
             while let Some(found) = lower[char_pos..].find(&query) {
                 let abs_pos = char_pos + found;
-                // Count words before this character position
-                let word_offset = text[..abs_pos].split_whitespace().count();
+                let word_offset = word_starts.partition_point(|&s| s < abs_pos);
                 self.search_matches.push((ch as usize, word_offset));
                 char_pos = abs_pos + query.len();
             }
@@ -272,7 +289,7 @@ impl App {
             state.chapter = ch;
             state.cursor_word = word_offset;
             // Reflow will be done by the event loop on next frame
-            state.scroll_to_cursor(20);
+            state.scroll_to_cursor();
         }
     }
 
@@ -302,9 +319,10 @@ impl App {
         let area = frame.area();
         let thm_idx = self.theme_index;
 
-        // Extract entries before mutable borrow of mode
-        let menu_entries: Vec<(String, LibraryEntry)> =
-            self.library.entries().iter().map(|(p, e)|
+        // Menu entries are only needed in Menu mode — avoid cloning the
+        // whole library on every reader/RSVP/TOC frame.
+        let menu_entries: Vec<(String, LibraryEntry)> = if matches!(self.mode, Mode::Menu(_)) {
+            self.library.entries().iter().map(|(p, e)| {
                 (p.to_string(), LibraryEntry {
                     title: e.title.clone(),
                     author: e.author.clone(),
@@ -316,7 +334,10 @@ impl App {
                     added: e.added,
                     cover_path: e.cover_path.clone(),
                 })
-            ).collect();
+            }).collect()
+        } else {
+            Vec::new()
+        };
         let menu_refs: Vec<(&str, &LibraryEntry)> =
             menu_entries.iter().map(|(p, e)| (p.as_str(), e)).collect();
         let search_matches = self.search_matches.clone();
@@ -328,7 +349,7 @@ impl App {
             Mode::Menu(ref mut state) => {
                 state.render(frame, area, thm, &menu_refs);
             }
-            Mode::Reader(ref state) => {
+            Mode::Reader(ref mut state) => {
                 if let Some(ref doc) = self.doc {
                     state.render(
                         frame,
@@ -384,7 +405,54 @@ impl App {
         }
     }
 
+    /// Mouse input: wheel scrolls the reader viewport (3 lines, like
+    /// j/k) and moves the menu selection. Arrow-key scroll emulation
+    /// from the terminal keeps working alongside this.
+    pub fn handle_mouse(&mut self, m: crossterm::event::MouseEvent) {
+        use crossterm::event::MouseEventKind;
+        match &mut self.mode {
+            Mode::Reader(state) => {
+                let delta: isize = match m.kind {
+                    MouseEventKind::ScrollUp => -3,
+                    MouseEventKind::ScrollDown => 3,
+                    _ => return,
+                };
+                self.needs_draw = true;
+                let max_scroll = state.wrapped_lines.len().saturating_sub(1);
+                state.scroll = if delta < 0 {
+                    state.scroll.saturating_sub((-delta) as usize)
+                } else {
+                    (state.scroll + delta as usize).min(max_scroll)
+                };
+                state.cursor_word = state
+                    .line_word_offsets
+                    .get(state.scroll)
+                    .copied()
+                    .unwrap_or(state.cursor_word);
+            }
+            Mode::Menu(state) => {
+                let total = self.library.entries().len();
+                match m.kind {
+                    MouseEventKind::ScrollUp => {
+                        self.needs_draw = true;
+                        state.selected_row = state.selected_row.saturating_sub(1);
+                    }
+                    MouseEventKind::ScrollDown => {
+                        self.needs_draw = true;
+                        let max_row = state.max_row(total);
+                        if state.selected_row < max_row {
+                            state.selected_row += 1;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
+    }
+
     pub fn handle_key(&mut self, key: KeyEvent) {
+        self.needs_draw = true;
         // Search input mode: capture all keystrokes
         if self.search_input {
             match key.code {
@@ -519,14 +587,14 @@ impl App {
             ReaderAction::CursorLeft => {
                 if let Mode::Reader(ref mut state) = &mut self.mode {
                     state.cursor_word = state.cursor_word.saturating_sub(1);
-                    state.scroll_to_cursor(20);
+                    state.scroll_to_cursor();
                 }
             }
             ReaderAction::CursorRight => {
                 if let Mode::Reader(ref mut state) = &mut self.mode {
                     let max = state.line_word_offsets.last().copied().unwrap_or(0);
                     state.cursor_word = (state.cursor_word + 1).min(max);
-                    state.scroll_to_cursor(20);
+                    state.scroll_to_cursor();
                 }
             }
             ReaderAction::NextChapter => {
@@ -579,8 +647,7 @@ impl App {
                         let count = doc.doc().chapter_count() as usize;
                         state.chapter = ch.min(count.saturating_sub(1));
                         state.cursor_word = cw;
-                        state.reflow(doc.doc(), 80);
-                        state.scroll_to_cursor(20);
+                        state.scroll_to_cursor();
                     }
                 }
             }
@@ -622,6 +689,31 @@ impl App {
             }
             ReaderAction::SearchPrev => {
                 self.search_prev();
+            }
+            ReaderAction::MarginAdjust { delta } => {
+                if let Mode::Reader(ref mut state) = &mut self.mode {
+                    if delta < 0 {
+                        state.margin = state.margin.saturating_sub((-delta) as u16);
+                    } else {
+                        state.margin = (state.margin + delta as u16).min(40);
+                    }
+                }
+            }
+            ReaderAction::ColWidthAdjust { delta } => {
+                if let Mode::Reader(ref mut state) = &mut self.mode {
+                    if delta > 0 {
+                        // Off -> start at a readable measure
+                        state.max_col_width = if state.max_col_width == 0 {
+                            80
+                        } else {
+                            (state.max_col_width + delta as u16).min(200)
+                        };
+                    } else if state.max_col_width > 0 {
+                        let next = state.max_col_width.saturating_sub((-delta) as u16);
+                        // Below a readable floor, turn the limit off
+                        state.max_col_width = if next < 50 { 0 } else { next };
+                    }
+                }
             }
         }
     }
@@ -694,8 +786,7 @@ impl App {
                 let mut reader = ReaderState::new(d);
                 reader.chapter = ch;
                 reader.cursor_word = cursor;
-                reader.reflow(d, 80);
-                reader.scroll_to_cursor(20);
+                reader.scroll_to_cursor();
                 self.mode = Mode::Reader(reader);
             }
             RsvpAction::Quit => {
@@ -755,8 +846,7 @@ impl App {
                 let mut reader = ReaderState::new(doc.doc());
                 reader.chapter = ch;
                 reader.cursor_word = 0;
-                reader.reflow(doc.doc(), 80);
-                reader.scroll_to_cursor(20);
+                reader.scroll_to_cursor();
                 self.mode = Mode::Reader(reader);
             }
             TocAction::Cancel => {
@@ -770,8 +860,7 @@ impl App {
                 let count = doc.doc().chapter_count() as usize;
                 reader.chapter = ch.min(count.saturating_sub(1));
                 reader.cursor_word = cw;
-                reader.reflow(doc.doc(), 80);
-                reader.scroll_to_cursor(20);
+                reader.scroll_to_cursor();
                 self.mode = Mode::Reader(reader);
             }
             TocAction::ToggleFilter => {
@@ -828,7 +917,7 @@ fn cursor_up(state: &mut ReaderState) {
             state.cursor_word = state.cursor_word.min(next_first.saturating_sub(1));
         }
     }
-    state.scroll_to_cursor(20);
+    state.scroll_to_cursor();
 }
 
 fn cursor_down(state: &mut ReaderState) {
@@ -845,7 +934,7 @@ fn cursor_down(state: &mut ReaderState) {
             state.cursor_word = state.cursor_word.min(next_first.saturating_sub(1));
         }
     }
-    state.scroll_to_cursor(20);
+    state.scroll_to_cursor();
 }
 
 // ── Library helpers ──
@@ -890,6 +979,55 @@ fn add_to_library(library: &mut Library, path: &str, doc: &dyn Document) {
 
 // ── Event loop ──
 
+/// Byte offset of every word start in `text` (ascending). Used to map
+/// search-match byte positions to word indices via binary search.
+fn word_byte_starts(text: &str) -> Vec<usize> {
+    let mut starts = Vec::new();
+    let mut in_word = false;
+    for (i, c) in text.char_indices() {
+        if c.is_whitespace() {
+            in_word = false;
+        } else if !in_word {
+            in_word = true;
+            starts.push(i);
+        }
+    }
+    starts
+}
+
+#[cfg(test)]
+mod tests {
+    use super::word_byte_starts;
+
+    /// The original O(n) per-match algorithm, kept as a test oracle.
+    fn oracle_offset(text: &str, abs_pos: usize) -> usize {
+        text[..abs_pos].split_whitespace().count()
+    }
+
+    #[test]
+    fn word_offset_matches_oracle() {
+        let text = "the quick  brown\n\nfox jumps\tover the lazy dog the end";
+        let starts = word_byte_starts(text);
+        // Check every byte position that begins a match of "the"
+        let lower = text.to_lowercase();
+        let mut pos = 0;
+        while let Some(found) = lower[pos..].find("the") {
+            let abs = pos + found;
+            let fast = starts.partition_point(|&s| s < abs);
+            assert_eq!(fast, oracle_offset(text, abs), "mismatch at byte {}", abs);
+            pos = abs + 3;
+        }
+        // Also check mid-word and whitespace positions exhaustively
+        for abs in 0..text.len() {
+            if !text.is_char_boundary(abs) {
+                continue;
+            }
+            let fast = starts.partition_point(|&s| s < abs);
+            assert_eq!(fast, oracle_offset(text, abs), "mismatch at byte {}", abs);
+        }
+    }
+}
+
 pub fn run(mut app: App) -> io::Result<()> {
     let mut stdout = io::stdout();
     crossterm::terminal::enable_raw_mode()?;
@@ -910,41 +1048,61 @@ pub fn run(mut app: App) -> io::Result<()> {
         }
     }
 
+    let mut last_kitty_size = (0u16, 0u16);
+
     while !app.should_quit {
-        // Reflow reader on each frame
+        // Reflow reader only when its inputs changed (chapter, width,
+        // margins) — not on every frame.
         if let Mode::Reader(ref mut state) = &mut app.mode {
             if let Some(ref doc) = app.doc {
                 let w = terminal.size()?.width;
-                state.reflow(doc.doc(), w);
+                if state.reflow_if_needed(doc.doc(), w) {
+                    app.needs_draw = true;
+                }
             }
         }
 
-        terminal.draw(|f| app.render(f))?;
+        if app.needs_draw {
+            terminal.draw(|f| app.render(f))?;
+            app.needs_draw = false;
+        }
 
-        // Kitty cover images — clear when not in menu, emit when in menu
+        // Kitty cover images — emit once per menu view (and on resize),
+        // clear once when leaving the menu.
         if volta_core::cover::is_kitty() {
             if let Mode::Menu(_) = &app.mode {
-                let entries = app.library.entries();
                 let size = terminal.size()?;
-                let cols = (size.width.saturating_sub(2) / (CARD_W + 1)).max(1) as usize;
-                for (i, (_path, entry)) in entries.iter().enumerate() {
-                    if let Some(ref cover) = entry.cover_path {
-                        let col = (i % cols) as u16;
-                        let row = (i / cols) as u16;
-                        let card_x = 1 + col * (CARD_W + 1);
-                        let card_y = 1 + row * (CARD_H + 1);
-                        volta_core::cover::kitty_display_image(cover, card_y, card_x, 6, 4);
+                let wh = (size.width, size.height);
+                if !app.kitty_covers_shown || wh != last_kitty_size {
+                    last_kitty_size = wh;
+                    let entries = app.library.entries();
+                    let cols =
+                        (size.width.saturating_sub(2) / (CARD_W + 1)).max(1) as usize;
+                    for (i, (_path, entry)) in entries.iter().enumerate() {
+                        if let Some(ref cover) = entry.cover_path {
+                            let col = (i % cols) as u16;
+                            let row = (i / cols) as u16;
+                            let card_x = 1 + col * (CARD_W + 1);
+                            let card_y = 1 + row * (CARD_H + 1);
+                            volta_core::cover::kitty_display_image(
+                                cover, card_y, card_x, 6, 4,
+                            );
+                        }
                     }
+                    app.kitty_covers_shown = true;
                 }
-            } else {
-                // Clear images when leaving menu mode
+            } else if app.kitty_covers_shown {
                 volta_core::cover::kitty_clear_all();
+                app.kitty_covers_shown = false;
             }
         }
 
         if event::poll(Duration::from_millis(16))? {
-            if let Ok(Event::Key(key)) = event::read() {
-                app.handle_key(key);
+            match event::read()? {
+                Event::Key(key) => app.handle_key(key),
+                Event::Mouse(m) => app.handle_mouse(m),
+                Event::Resize(_, _) => app.needs_draw = true,
+                _ => {}
             }
         }
 

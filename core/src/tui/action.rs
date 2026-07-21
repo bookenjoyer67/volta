@@ -28,6 +28,8 @@ pub enum ReaderAction {
     SearchStart,
     SearchNext,
     SearchPrev,
+    MarginAdjust { delta: i16 },
+    ColWidthAdjust { delta: i16 },
 }
 
 impl ReaderAction {
@@ -184,6 +186,12 @@ impl ReaderAction {
                 ReaderAction::ThemeNext
             }
             KeyCode::Char('T') => ReaderAction::ThemePrev,
+
+            // Layout: margins and max column width
+            KeyCode::Char('<') => ReaderAction::MarginAdjust { delta: -2 },
+            KeyCode::Char('>') => ReaderAction::MarginAdjust { delta: 2 },
+            KeyCode::Char('{') => ReaderAction::ColWidthAdjust { delta: -10 },
+            KeyCode::Char('}') => ReaderAction::ColWidthAdjust { delta: 10 },
 
             _ => ReaderAction::None,
         }
