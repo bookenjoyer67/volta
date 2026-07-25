@@ -38,7 +38,26 @@
 
 ## Install
 
-### Dependencies
+### Package managers (recommended)
+
+```bash
+# Arch Linux / CachyOS (AUR)
+yay -S volta
+# or: paru -S volta
+
+# Fedora
+sudo dnf copr enable bookenjoyer/volta
+sudo dnf install volta
+
+# Debian / Ubuntu
+# Download the .deb from the latest release:
+# https://git.komun.buzz/Book-Enjoyer/volta/releases
+sudo apt install ./volta_0.1.0-1_amd64.deb
+```
+
+### Build from source
+
+#### Dependencies
 
 ```
 arch:     sudo pacman -S love rust poppler zenity
@@ -49,7 +68,7 @@ fedora:   sudo dnf install love rust cargo poppler-utils zenity
 ### Build
 
 ```bash
-git clone https://github.com/bookenjoyer67/volta.git
+git clone https://git.komun.buzz/Book-Enjoyer/volta.git
 cd volta
 ./build.sh
 ```
@@ -149,10 +168,11 @@ volta/
 │   ├── reader.lua     Normal reading mode
 │   ├── rsvp.lua       RSVP display + timer
 │   └── themes/        Built-in color themes
+├── packaging/         Arch PKGBUILD, Debian rules, Fedora spec
 ├── build.sh           cargo build + copy .so
 ├── run.sh             build + launch LÖVE
 ├── volta              Dual-mode launcher script
-└── volta.desktop      Desktop entry
+├── volta.desktop      Desktop entry
 ```
 
 Deep dive: [ARCHITECTURE.md](ARCHITECTURE.md)

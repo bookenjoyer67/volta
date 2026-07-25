@@ -1,0 +1,24 @@
+Source: volta
+Section: text
+Priority: optional
+Maintainer: Book-Enjoyer <catperson@catperson.online>
+Build-Depends: debhelper-compat (= 13), cargo, rustc
+Standards-Version: 4.6.2
+Homepage: https://git.komun.buzz/Book-Enjoyer/volta
+Rules-Requires-Root: no
+
+Package: volta
+Architecture: amd64
+Depends: ${shlibs:Depends}, ${misc:Depends}, love, poppler-utils, zenity, curl
+Description: Desktop ebook reader with RSVP speed reading
+ Volta is a dual-mode ebook reader supporting EPUB, PDF, and Markdown.
+ It features RSVP (Rapid Serial Visual Presentation) speed reading,
+ a keyboard-driven TUI (terminal) mode, and a LÖVE-based GUI mode.
+ .
+ Features:
+  * Library grid with cover images and progress bars
+  * RSVP one-word-at-a-time reading with adjustable WPM
+  * Full-text search across all chapters
+  * 8 built-in color themes
+  * Progress saving and resume
+  * URL auto-download for remote books

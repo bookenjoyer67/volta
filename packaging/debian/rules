@@ -1,0 +1,37 @@
+#!/usr/bin/make -f
+# Debian rules for Volta — uses dh sequencer
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	cargo build --release --manifest-path core/Cargo.toml
+
+override_dh_auto_test:
+	cargo test --release --manifest-path core/Cargo.toml
+
+override_dh_auto_install:
+	# TUI binary
+	install -Dm755 target/release/volta-tui $(CURDIR)/debian/volta/usr/bin/volta-tui
+
+	# Shared library
+	install -Dm755 target/release/libvolta_core.so $(CURDIR)/debian/volta/usr/lib/volta/libvolta_core.so
+
+	# LÖVE frontend
+	install -dm755 $(CURDIR)/debian/volta/usr/share/volta/frontend
+	cp -r frontend/* $(CURDIR)/debian/volta/usr/share/volta/frontend/
+
+	# Launcher
+	install -Dm755 volta $(CURDIR)/debian/volta/usr/bin/volta
+
+	# Desktop entry
+	sed 's|Exec=.*|Exec=/usr/bin/volta|' volta.desktop > /tmp/volta.desktop.deb
+	install -Dm644 /tmp/volta.desktop.deb $(CURDIR)/debian/volta/usr/share/applications/volta.desktop
+	rm -f /tmp/volta.desktop.deb
+
+	# Docs
+	install -Dm644 README.md $(CURDIR)/debian/volta/usr/share/doc/volta/README.md
+	install -Dm644 KEYBINDINGS.md $(CURDIR)/debian/volta/usr/share/doc/volta/KEYBINDINGS.md
+
+	# License
+	install -Dm644 LICENSE $(CURDIR)/debian/volta/usr/share/doc/volta/copyright

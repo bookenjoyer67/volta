@@ -9,12 +9,37 @@
 # Usage:
 #   volta book.epub          # TUI in terminal, GUI from desktop icon
 #   volta --gui book.epub    # GUI even from terminal, prompt freed
+#
+# Path detection (first match wins):
+#   1. $VOLTA_HOME — explicit override
+#   2. /usr (system install) — if /usr/bin/volta-tui exists
+#   3. $HOME/volta — dev/git clone
 
 set -euo pipefail
 
-VOLTA_HOME="${VOLTA_HOME:-$HOME/volta}"
-FRONTEND="$VOLTA_HOME/frontend"
-TUI_BIN="$VOLTA_HOME/target/release/volta-tui"
+# ── Path detection ──
+if [ -n "${VOLTA_HOME:-}" ]; then
+    # Explicit override
+    PREFIX="$VOLTA_HOME"
+    TUI_BIN="$PREFIX/bin/volta-tui"
+    FRONTEND="$PREFIX/share/volta/frontend"
+    LIB_PATH="$PREFIX/lib/volta/libvolta_core.so"
+    DEV_MODE=0
+elif [ -f /usr/bin/volta-tui ]; then
+    # System install
+    PREFIX=/usr
+    TUI_BIN=/usr/bin/volta-tui
+    FRONTEND=/usr/share/volta/frontend
+    LIB_PATH=/usr/lib/volta/libvolta_core.so
+    DEV_MODE=0
+else
+    # Dev / git clone
+    PREFIX="${HOME}/volta"
+    TUI_BIN="$PREFIX/target/release/volta-tui"
+    FRONTEND="$PREFIX/frontend"
+    LIB_PATH="$FRONTEND/libvolta_core.so"
+    DEV_MODE=1
+fi
 
 # ── Check for --gui flag ──
 FORCE_GUI=0
@@ -44,30 +69,31 @@ if [[ "${1:-}" == http://* || "${1:-}" == https://* ]]; then
     set -- "$DEST" "${@:2}"
 fi
 
-# ── Build if needed ──
-NEEDS_BUILD=0
-if [[ ! -f "$TUI_BIN" ]] || [[ ! -f "$FRONTEND/libvolta_core.so" ]]; then
-    NEEDS_BUILD=1
-else
-    for src in "$VOLTA_HOME/core/src/"*.rs "$VOLTA_HOME/core/src/tui/"*.rs; do
-        [ -f "$src" ] || continue
-        [ "$src" -nt "$TUI_BIN" ] && NEEDS_BUILD=1 && break
-    done
-fi
+# ── Build if needed (dev mode only) ──
+if [ $DEV_MODE -eq 1 ]; then
+    NEEDS_BUILD=0
+    if [[ ! -f "$TUI_BIN" ]] || [[ ! -f "$LIB_PATH" ]]; then
+        NEEDS_BUILD=1
+    else
+        for src in "$PREFIX/core/src/"*.rs "$PREFIX/core/src/tui/"*.rs; do
+            [ -f "$src" ] || continue
+            [ "$src" -nt "$TUI_BIN" ] && NEEDS_BUILD=1 && break
+        done
+    fi
 
-if [ $NEEDS_BUILD -eq 1 ]; then
-    echo "==> Building Volta..." >&2
-    cd "$VOLTA_HOME"
-    ./build.sh || exit 1
+    if [ $NEEDS_BUILD -eq 1 ]; then
+        echo "==> Building Volta..." >&2
+        cd "$PREFIX"
+        ./build.sh || exit 1
+    fi
 fi
 
 # ── Update bridge.lua .so path if needed ──
 BRIDGE_LUA="$FRONTEND/bridge.lua"
-if grep -q 'local lib_path =' "$BRIDGE_LUA" 2>/dev/null; then
+if [ -f "$BRIDGE_LUA" ] && grep -q 'local lib_path =' "$BRIDGE_LUA" 2>/dev/null; then
     CURRENT_PATH=$(grep 'local lib_path =' "$BRIDGE_LUA" | head -1 | sed 's/.*"\(.*\)".*/\1/')
-    EXPECTED_PATH="$FRONTEND/libvolta_core.so"
-    if [[ "$CURRENT_PATH" != "$EXPECTED_PATH" ]]; then
-        sed -i "s|local lib_path = \".*\"|local lib_path = \"$EXPECTED_PATH\"|" "$BRIDGE_LUA"
+    if [[ "$CURRENT_PATH" != "$LIB_PATH" ]]; then
+        sed -i "s|local lib_path = \".*\"|local lib_path = \"$LIB_PATH\"|" "$BRIDGE_LUA"
     fi
 fi
 
