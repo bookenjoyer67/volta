@@ -42,8 +42,8 @@
 
 ```bash
 # Arch Linux / CachyOS (AUR)
-yay -S volta
-# or: paru -S volta
+yay -S volta-reader
+# or: paru -S volta-reader
 
 # Fedora
 sudo dnf copr enable bookenjoyer/volta
