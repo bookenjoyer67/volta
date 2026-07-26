@@ -66,8 +66,8 @@ function M:enter()
 
   -- Restore saved position if available
   local saved = book._saved
-  if saved and saved.chapter then
-    M.current_chapter = math.min(saved.chapter, book:chapter_count() - 1)
+  if saved and saved.current_chapter then
+    M.current_chapter = math.min(saved.current_chapter, book:chapter_count() - 1)
     M.scroll_y = saved.scroll_y or 0
     book._saved = nil  -- consume so we don't re-restore on re-entry
   else
@@ -84,8 +84,8 @@ function M:enter()
   M:_reflow()
 
   -- Restore cursor position from saved progress, or start at top
-  if saved and saved.cursor_word then
-    M.cursor_word = math.min(saved.cursor_word,
+  if saved and saved.current_word then
+    M.cursor_word = math.min(saved.current_word,
       M.line_word_offsets[#M.line_word_offsets] or 0)
     M:_scroll_to_cursor()
   else
@@ -985,9 +985,9 @@ function M:_save_progress()
   if not book:is_loaded() then return end
   local progress = require("progress")
   progress:save(book.file_path, {
-    chapter = M.current_chapter,
+    current_chapter = M.current_chapter,
     scroll_y = M.scroll_y,
-    cursor_word = M.cursor_word,
+    current_word = M.cursor_word,
     word_index = book:current_index(),
     wpm = config.wpm,
   })

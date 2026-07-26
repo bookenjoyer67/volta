@@ -13,7 +13,7 @@ local M = {}
 -- Resolve save path: ~/.local/share/volta/
 local home = os.getenv("HOME") or os.getenv("USERPROFILE") or "/tmp"
 M._save_dir = home .. "/.local/share/volta"
-M._progress_file = M._save_dir .. "/progress.json"
+M._progress_file = M._save_dir .. "/library.json"
 
 M.data = {}
 M.dirty = false
