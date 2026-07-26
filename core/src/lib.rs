@@ -173,6 +173,11 @@ fn add_to_library(doc: &dyn Document, path: &Path, format: &str) {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
+    // Preserve existing progress so opening a book doesn't reset saved position
+    let (saved_ch, saved_cw) = library
+        .get(&path_s)
+        .map(|e| (e.current_chapter, e.current_word))
+        .unwrap_or((0, 0));
     library.upsert(
         &path_s,
         LibraryEntry {
@@ -180,8 +185,8 @@ fn add_to_library(doc: &dyn Document, path: &Path, format: &str) {
             author: String::new(),
             format: format.to_string(),
             chapter_count: doc.chapter_count(),
-            current_chapter: 0,
-            current_word: 0,
+            current_chapter: saved_ch,
+            current_word: saved_cw,
             last_opened: now,
             added: now,
             cover_path,
