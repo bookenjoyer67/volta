@@ -354,7 +354,7 @@ function M:_jump_to_match()
   M.current_chapter = m.chapter
   M.cursor_word = m.word_offset
   M.scroll_y = 0
-  M:_reflow()
+  M:_on_chapter_change()
   M:_scroll_to_cursor()
 end
 
@@ -641,6 +641,12 @@ function M:draw()
   end
 end
 
+--- Called after chapter changes: reflow text and reload inline images.
+function M:_on_chapter_change()
+  M:_reflow()
+  M:_load_images()
+end
+
 function M:keypressed(key, scancode, isrepeat)
   local kb = input_mod
 
@@ -824,7 +830,7 @@ function M:keypressed(key, scancode, isrepeat)
       M.current_chapter = M.current_chapter + 1
       M.scroll_y = 0
       M.cursor_word = 0
-      M:_reflow()
+      M:_on_chapter_change()
     end
 
   elseif key == kb:get("reader_search_prev") then
@@ -834,7 +840,7 @@ function M:keypressed(key, scancode, isrepeat)
       M.current_chapter = M.current_chapter - 1
       M.scroll_y = 0
       M.cursor_word = 0
-      M:_reflow()
+      M:_on_chapter_change()
     end
 
   elseif key == "p" and not M.has_matches then
@@ -842,7 +848,7 @@ function M:keypressed(key, scancode, isrepeat)
       M.current_chapter = M.current_chapter - 1
       M.scroll_y = 0
       M.cursor_word = 0
-      M:_reflow()
+      M:_on_chapter_change()
     end
 
   -- ── Vim gg / G ──
@@ -910,7 +916,7 @@ function M:keypressed(key, scancode, isrepeat)
       M.current_chapter = pos[1]
       M.cursor_word = pos[2]
       M.scroll_y = 0
-      M:_reflow()
+      M:_on_chapter_change()
       M:_scroll_to_cursor()
     end
 

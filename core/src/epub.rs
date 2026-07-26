@@ -70,7 +70,10 @@ fn resolve_image_src(base_href: &str, src: &str) -> String {
         match segment {
             "." | "" => {} // skip empty and current-dir
             ".." => {
-                parts.pop();
+                // Don't pop the last directory (can't go above EPUB root)
+                if parts.len() > 1 {
+                    parts.pop();
+                }
             }
             _ => parts.push(segment),
         }
@@ -212,7 +215,10 @@ impl EpubDoc {
         while let Some(content_result) = reader.read_next() {
             let content = content_result
                 .map_err(|e| format!("Failed to read chapter: {}", e))?;
-            let raw_text = content.content();       // &str — the XHTML body
+            // rbook's content() strips HTML — read raw XHTML for image extraction
+            let raw_xhtml = content.manifest_entry().read_str()
+                .map_err(|e| format!("Failed to read raw XHTML: {}", e))?;
+            let raw_text: &str = &raw_xhtml; // raw XHTML with <img> tags intact
             let spine_entry = content.spine_entry(); // metadata for this entry
 
             // Get the base href of this spine entry for image path resolution
@@ -248,14 +254,12 @@ impl EpubDoc {
                 raw_text.into()
             };
 
-            // --- HTML stripping + image extraction ---
+            // --- HTML stripping + image detection ---
             // Character-level state machine: tag contents are captured so
             // block-level closing tags (</p>, </div>, headings, <br>, ...)
-            // can emit paragraph breaks. <img> tags are captured for image
-            // extraction.
-            //
-            // We track images with their character position in clean_text,
-            // then compute word_offset after whitespace normalization.
+            // can emit paragraph breaks. <img> tags are recorded with their
+            // clean_text position so word_offset is computed from actual
+            // visible text, not raw HTML tokens.
             const BLOCK_TAGS: &[&str] = &[
                 "/p", "/div", "/h1", "/h2", "/h3", "/h4", "/h5", "/h6", "/li",
                 "/blockquote", "/section", "/article", "/tr", "br", "br/",
@@ -266,6 +270,8 @@ impl EpubDoc {
             let mut tag_buf = String::new();
             // Content of these blocks is code, not prose — drop it entirely.
             let mut skip_block: Option<&'static str> = None;
+            // Record <img> tag positions in clean_text for word_offset computation.
+            let mut image_tags: Vec<(usize, String)> = Vec::new();
 
             for ch in raw_text.chars() {
                 match ch {
@@ -277,6 +283,10 @@ impl EpubDoc {
                         in_tag = false;
                         let name = tag_buf.trim().to_ascii_lowercase();
                         let name = name.split_whitespace().next().unwrap_or("");
+                        // Record <img> tag before any block-tag processing
+                        if name == "img" && skip_block.is_none() {
+                            image_tags.push((clean_text.len(), tag_buf.clone()));
+                        }
                         match name {
                             "style" => skip_block = Some("/style"),
                             "script" => skip_block = Some("/script"),
@@ -316,90 +326,59 @@ impl EpubDoc {
                 .collect::<Vec<_>>()
                 .join("\n\n");
             // --- compute word_offsets for images ---
-            // Images are detected and extracted by scanning the raw
-            // comment-stripped XHTML for <img> tags and resolving src
-            // attributes against the spine entry's base href.
+            // Image tags were recorded during HTML stripping with their
+            // clean_text position, giving an exact word_offset.
             let mut chapter_images: Vec<ChapterImage> = Vec::new();
 
-            // Re-extract images from raw_text (post-comment-stripping)
-            let stripped_raw = {
-                let mut s = String::with_capacity(raw_text.len());
-                let mut rest: &str = &raw_text;
-                while let Some(start) = rest.find("<!--") {
-                    s.push_str(&rest[..start]);
-                    rest = match rest[start..].find("-->") {
-                        Some(end) => &rest[start + end + 3..],
-                        None => "",
-                    };
-                }
-                s.push_str(rest);
-                s
-            };
+            for (clean_pos, tag_content) in &image_tags {
+                let tag_lower = tag_content.to_ascii_lowercase();
+                if let Some(src_start) = tag_lower.find("src=") {
+                    let rest = &tag_content[src_start + 4..];
+                    let quote_char = rest.chars().next().unwrap_or('"');
+                    if quote_char == '"' || quote_char == '\'' {
+                        if let Some(src_end) = rest[1..].find(quote_char) {
+                            let src = &rest[1..src_end + 1];
+                            let resolved = resolve_image_src(&base_href, src);
 
-            // Find all <img ...> tags in the stripped raw text
-            {
-                let search = stripped_raw.as_str();
-                let mut pos = 0usize;
-                while let Some(tag_start) = search[pos..].find("<img") {
-                    let abs_start = pos + tag_start;
-                    // Find closing >
-                    let after_tag = &search[abs_start..];
-                    if let Some(tag_end) = after_tag.find('>') {
-                        let tag_content = &after_tag[..tag_end + 1];
-                        let tag_lower = tag_content.to_ascii_lowercase();
-                        if let Some(src_start) = tag_lower.find("src=") {
-                            let rest = &tag_content[src_start + 4..];
-                            let quote_char = rest.chars().next().unwrap_or('"');
-                            if quote_char == '"' || quote_char == '\'' {
-                                if let Some(src_end) = rest[1..].find(quote_char) {
-                                    let src = &rest[1..src_end + 1];
-                                    let resolved = resolve_image_src(&base_href, src);
+                            // word_offset from clean_text position, not raw HTML
+                            let prefix = &clean_text[..(*clean_pos).min(clean_text.len())];
+                            let word_offset = prefix.split_whitespace().count();
 
-                                    // Count words in raw text up to abs_start
-                                    let prefix = &search[..abs_start];
-                                    let word_offset = prefix.split_whitespace().count();
-
-                                    // Extract and cache the image
-                                    if let Some(cache_path) =
-                                        image_cache_path(&epub_path_str, &resolved)
-                                    {
-                                        if !cache_path.exists() {
-                                            if let Some(entry) = manifest.by_href(&resolved) {
-                                                if let Ok(bytes) = entry.read_bytes() {
-                                                    if let Ok(img) = image::load_from_memory(&bytes)
-                                                    {
-                                                        let _ = img.save(&cache_path);
-                                                    }
-                                                }
+                            // Extract and cache the image
+                            if let Some(cache_path) =
+                                image_cache_path(&epub_path_str, &resolved)
+                            {
+                                if !cache_path.exists() {
+                                    if let Some(entry) = manifest.by_href(&resolved) {
+                                        if let Ok(bytes) = entry.read_bytes() {
+                                            if let Ok(img) = image::load_from_memory(&bytes) {
+                                                let _ = img.save(&cache_path);
                                             }
                                         }
-
-                                        // Get dimensions
-                                        let (w, h) = if cache_path.exists() {
-                                            image::ImageReader::new(std::io::Cursor::new(
-                                                &fs::read(&cache_path).unwrap_or_default(),
-                                            ))
-                                            .with_guessed_format()
-                                            .ok()
-                                            .and_then(|r| r.into_dimensions().ok())
-                                            .unwrap_or((0, 0))
-                                        } else {
-                                            (0, 0)
-                                        };
-
-                                        chapter_images.push(ChapterImage {
-                                            word_offset,
-                                            cached_path: cache_path.to_string_lossy().to_string(),
-                                            width: w,
-                                            height: h,
-                                        });
                                     }
                                 }
+
+                                // Get dimensions
+                                let (w, h) = if cache_path.exists() {
+                                    image::ImageReader::new(std::io::Cursor::new(
+                                        &fs::read(&cache_path).unwrap_or_default(),
+                                    ))
+                                    .with_guessed_format()
+                                    .ok()
+                                    .and_then(|r| r.into_dimensions().ok())
+                                    .unwrap_or((0, 0))
+                                } else {
+                                    (0, 0)
+                                };
+
+                                chapter_images.push(ChapterImage {
+                                    word_offset,
+                                    cached_path: cache_path.to_string_lossy().to_string(),
+                                    width: w,
+                                    height: h,
+                                });
                             }
                         }
-                        pos = abs_start + tag_end + 1;
-                    } else {
-                        break;
                     }
                 }
             }
