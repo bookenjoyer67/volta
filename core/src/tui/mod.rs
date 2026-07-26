@@ -215,6 +215,35 @@ impl App {
                 self.library
                     .update_progress(path, chapter as u32, cursor_word);
                 self.library.save();
+
+                // Also save to progress.json for GUI compatibility
+                let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+                let progress_path = format!("{}/.local/share/volta/progress.json", home);
+                let _ = std::fs::create_dir_all(format!("{}/.local/share/volta", home));
+                if let Ok(data) = std::fs::read_to_string(&progress_path) {
+                    if let Ok(mut map) = serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&data) {
+                        map.insert(path.clone(), serde_json::json!({
+                            "chapter": chapter,
+                            "cursor_word": cursor_word,
+                            "last_ts": std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_secs(),
+                        }));
+                        let _ = std::fs::write(&progress_path, serde_json::to_string(&map).unwrap_or_default());
+                    }
+                } else {
+                    let mut map = serde_json::Map::new();
+                    map.insert(path.clone(), serde_json::json!({
+                        "chapter": chapter,
+                        "cursor_word": cursor_word,
+                        "last_ts": std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs(),
+                    }));
+                    let _ = std::fs::write(&progress_path, serde_json::to_string(&map).unwrap_or_default());
+                }
             }
             self.flash = (1.5, "Saved".into());
         }
