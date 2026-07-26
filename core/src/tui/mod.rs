@@ -157,10 +157,9 @@ impl App {
             _ => return,
         };
 
-        // Capture saved position before add_to_library resets it
+        // Capture saved position from progress.json before add_to_library resets
         let path_str = path.to_string_lossy().to_string();
-        let saved = self.library.get(&path_str)
-            .map(|e| (e.current_chapter as usize, e.current_word));
+        let saved = read_progress(&path_str);
 
         add_to_library(&mut self.library, &path_str, doc.doc());
 
@@ -1131,6 +1130,22 @@ fn build_selection_text(
     }
 
     result
+}
+
+/// Read saved (chapter, cursor_word) from progress.json, or None.
+fn read_progress(path: &str) -> Option<(usize, usize)> {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+    let progress_path = format!("{}/.local/share/volta/progress.json", home);
+    if let Ok(data) = std::fs::read_to_string(&progress_path) {
+        if let Ok(map) = serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&data) {
+            if let Some(entry) = map.get(path) {
+                let ch = entry.get("chapter").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                let cw = entry.get("cursor_word").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                return Some((ch, cw));
+            }
+        }
+    }
+    None
 }
 
 #[cfg(test)]
