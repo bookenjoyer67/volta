@@ -41,6 +41,16 @@ ffi.cdef [[
   const char* rsvp_chapter_title(DocEnum* doc, uint32_t c);
   const char* rsvp_chapter_text(DocEnum* doc, uint32_t c);
 
+  /* Chapter images (EPUB only) */
+  typedef struct {
+    uint32_t    word_offset;
+    const char* cached_path;
+    uint32_t    width;
+    uint32_t    height;
+  } ChapterImageC;
+  uint32_t    rsvp_chapter_image_count(DocEnum* doc, uint32_t chapter);
+  const ChapterImageC* rsvp_chapter_image_at(DocEnum* doc, uint32_t chapter, uint32_t i);
+
   /* Page rendering (PDF only) */
   const char* rsvp_render_page(DocEnum* doc, uint32_t page, uint32_t dpi);
 

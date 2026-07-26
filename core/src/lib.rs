@@ -39,6 +39,15 @@ use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
 use std::path::Path;
 
+/// C-compatible image info for FFI export.
+#[repr(C)]
+pub struct ChapterImageC {
+    pub word_offset: u32,
+    pub cached_path: *const c_char,
+    pub width: u32,
+    pub height: u32,
+}
+
 // ────────────────────────────────────────────────────────────────
 // DocEnum — format dispatcher
 // ────────────────────────────────────────────────────────────────
@@ -375,6 +384,56 @@ pub extern "C" fn rsvp_render_page(
         }
         DocEnum::Md(_, _) => std::ptr::null(),
         DocEnum::Epub(_, _) => std::ptr::null(),
+    }
+}
+
+/// Count of inline images in chapter `chapter` (0-based).
+/// Returns 0 for PDF/MD docs.
+#[no_mangle]
+pub extern "C" fn rsvp_chapter_image_count(
+    doc: *mut DocEnum,
+    chapter: u32,
+) -> u32 {
+    if doc.is_null() {
+        return 0;
+    }
+    let doc = unsafe { &*doc };
+    match doc {
+        DocEnum::Epub(epub_doc, _) => {
+            if chapter >= epub_doc.chapters.len() as u32 {
+                return 0;
+            }
+            epub_doc.chapters[chapter as usize].images.len() as u32
+        }
+        _ => 0,
+    }
+}
+
+/// Get the C struct for image `i` in chapter `chapter`.
+/// Returns NULL if out of bounds or doc doesn't support images.
+/// The returned pointer is valid until `rsvp_close`.
+#[no_mangle]
+pub extern "C" fn rsvp_chapter_image_at(
+    doc: *mut DocEnum,
+    chapter: u32,
+    i: u32,
+) -> *const ChapterImageC {
+    if doc.is_null() {
+        return std::ptr::null();
+    }
+    let doc = unsafe { &*doc };
+    match doc {
+        DocEnum::Epub(epub_doc, _) => {
+            if chapter >= epub_doc.chapter_image_c.len() as u32 {
+                return std::ptr::null();
+            }
+            let ch_images = &epub_doc.chapter_image_c[chapter as usize];
+            if i >= ch_images.len() as u32 {
+                return std::ptr::null();
+            }
+            &ch_images[i as usize] as *const ChapterImageC
+        }
+        _ => std::ptr::null(),
     }
 }
 

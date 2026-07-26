@@ -30,6 +30,9 @@ pub enum ReaderAction {
     SearchPrev,
     MarginAdjust { delta: i16 },
     ColWidthAdjust { delta: i16 },
+    ToggleVisual,
+    ToggleVisualLine,
+    Yank,
 }
 
 impl ReaderAction {
@@ -39,7 +42,15 @@ impl ReaderAction {
         }
 
         match key.code {
-            KeyCode::Esc => ReaderAction::BackToMenu,
+            KeyCode::Esc => {
+                if state.selection_anchor.is_some() {
+                    state.selection_anchor = None;
+                    state.visual_line_mode = false;
+                    ReaderAction::None
+                } else {
+                    ReaderAction::BackToMenu
+                }
+            }
             KeyCode::Up => ReaderAction::CursorUp,
             KeyCode::Down => ReaderAction::CursorDown,
             KeyCode::Left => ReaderAction::CursorLeft,
@@ -47,6 +58,23 @@ impl ReaderAction {
 
             // Search: / enters search mode
             KeyCode::Char('/') => ReaderAction::SearchStart,
+
+            // Visual mode: v = char-wise, V = line-wise
+            KeyCode::Char('v') if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                ReaderAction::ToggleVisual
+            }
+            KeyCode::Char('V') if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                ReaderAction::ToggleVisualLine
+            }
+
+            // Yank (copy): y when visual mode is active
+            KeyCode::Char('y') => {
+                if state.selection_anchor.is_some() {
+                    ReaderAction::Yank
+                } else {
+                    ReaderAction::None
+                }
+            }
 
             // n/N: next/prev match if search active, else next/prev chapter
             KeyCode::Char('n') => {

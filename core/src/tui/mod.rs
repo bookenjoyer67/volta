@@ -46,7 +46,7 @@ pub struct App {
     pub file_path: Option<String>, // for progress save key
     pub should_quit: bool,
     pub last_tick: Instant,
-    pub save_flash: f64,    // seconds remaining for "Saved" confirmation
+    pub flash: (f64, String),    // (seconds, message) for status-bar flash
     pub theme_index: usize, // index into theme::THEMES
     pub library: Library,
     // Search state
@@ -71,7 +71,7 @@ impl App {
             file_path: None,
             should_quit: false,
             last_tick: Instant::now(),
-            save_flash: 0.0,
+            flash: (0.0, String::new()),
             theme_index: 0,
             library,
             search_query: String::new(),
@@ -96,7 +96,7 @@ impl App {
             file_path: Some(file_path),
             should_quit: false,
             last_tick: Instant::now(),
-            save_flash: 0.0,
+            flash: (0.0, String::new()),
             theme_index: 0,
             library,
             search_query: String::new(),
@@ -191,9 +191,9 @@ impl App {
                 }
             }
         }
-        // Count down save flash
-        if self.save_flash > 0.0 {
-            self.save_flash = (self.save_flash - 0.016).max(0.0);
+        // Count down status-bar flash
+        if self.flash.0 > 0.0 {
+            self.flash.0 = (self.flash.0 - 0.016).max(0.0);
             self.needs_draw = true;
         }
     }
@@ -216,7 +216,7 @@ impl App {
                     .update_progress(path, chapter as u32, cursor_word);
                 self.library.save();
             }
-            self.save_flash = 1.5;
+            self.flash = (1.5, "Saved".into());
         }
     }
 
@@ -384,15 +384,15 @@ impl App {
                 ),
             );
         }
-        // "Saved" flash
-        if self.save_flash > 0.0 {
-            let alpha = self.save_flash.min(1.0);
+        // Status-bar flash (Saved / Yanked / etc.)
+        if self.flash.0 > 0.0 {
+            let alpha = self.flash.0.min(1.0);
             let style = Style::default().fg(Color::Rgb(
                 (0.0 * 255.0 * alpha) as u8,
                 (1.0 * 255.0 * alpha) as u8,
                 (0.5 * 255.0 * alpha) as u8,
             ));
-            let line = Line::from(Span::styled("Saved", style));
+            let line = Line::from(Span::styled(self.flash.1.clone(), style));
             frame.render_widget(
                 Paragraph::new(line),
                 Rect::new(
@@ -715,6 +715,67 @@ impl App {
                     }
                 }
             }
+            ReaderAction::ToggleVisual => {
+                if let Mode::Reader(ref mut state) = &mut self.mode {
+                    if state.selection_anchor.is_some() {
+                        state.selection_anchor = None;
+                        state.visual_line_mode = false;
+                    } else {
+                        state.selection_anchor = Some(state.cursor_word);
+                        state.visual_line_mode = false;
+                    }
+                }
+            }
+            ReaderAction::ToggleVisualLine => {
+                if let Mode::Reader(ref mut state) = &mut self.mode {
+                    if state.selection_anchor.is_some() {
+                        state.selection_anchor = None;
+                        state.visual_line_mode = false;
+                    } else {
+                        // Snap anchor to line start, cursor to line end
+                        let anchor_line = state.cursor_line();
+                        let anchor_word = state.line_word_offsets[anchor_line];
+                        let end_word = if anchor_line + 1 < state.line_word_offsets.len() {
+                            state.line_word_offsets[anchor_line + 1].saturating_sub(1)
+                        } else {
+                            state.line_word_offsets.last().copied().unwrap_or(0)
+                        };
+                        state.selection_anchor = Some(anchor_word);
+                        state.cursor_word = end_word;
+                        state.visual_line_mode = true;
+                    }
+                }
+            }
+            ReaderAction::Yank => {
+                if let Mode::Reader(ref mut state) = &mut self.mode {
+                    if let Some(anchor) = state.selection_anchor {
+                        let start = anchor.min(state.cursor_word);
+                        let end = anchor.max(state.cursor_word);
+                        let text = build_selection_text(&state.wrapped_lines, &state.line_word_offsets, start, end);
+                        let word_count = end - start + 1;
+
+                        // Copy to system clipboard via wl-copy (Wayland / X11)
+                        #[cfg(feature = "tui")]
+                        {
+                            use std::io::Write;
+                            let _ = std::process::Command::new("wl-copy")
+                                .stdin(std::process::Stdio::piped())
+                                .spawn()
+                                .and_then(|mut child| {
+                                    if let Some(mut stdin) = child.stdin.take() {
+                                        stdin.write_all(text.as_bytes())?;
+                                    }
+                                    child.wait()
+                                });
+                        }
+
+                        state.selection_anchor = None;
+                        state.visual_line_mode = false;
+                        let msg = format!("Yanked {} words", word_count);
+                        self.flash = (1.5, msg);
+                    }
+                }
+            }
         }
     }
 
@@ -993,6 +1054,54 @@ fn word_byte_starts(text: &str) -> Vec<usize> {
         }
     }
     starts
+}
+
+/// Build a plain-text string from a word range spanning wrapped lines.
+/// word range is inclusive: [start_word, end_word].
+/// Strips the 4-space paragraph indent from yanked text.
+fn build_selection_text(
+    wrapped_lines: &[String],
+    line_word_offsets: &[usize],
+    start_word: usize,
+    end_word: usize,
+) -> String {
+    let mut result = String::new();
+    let mut prev_line_has_words = false;
+
+    for (li, line) in wrapped_lines.iter().enumerate() {
+        let first = line_word_offsets[li];
+        let words_in_line = line.split_whitespace().count();
+        if words_in_line == 0 {
+            continue;
+        }
+        let last = first + words_in_line - 1;
+
+        // Does this line overlap our range?
+        if last < start_word || first > end_word {
+            continue;
+        }
+
+        // If we skipped lines and had content, insert a space
+        if prev_line_has_words && !result.is_empty() {
+            result.push(' ');
+        }
+
+        // Collect words in this line that fall within the range
+        let mut line_words: Vec<&str> = Vec::new();
+        for (wi, word) in line.split_whitespace().enumerate() {
+            let global = first + wi;
+            if global >= start_word && global <= end_word {
+                line_words.push(word);
+            }
+        }
+
+        if !line_words.is_empty() {
+            result.push_str(&line_words.join(" "));
+            prev_line_has_words = true;
+        }
+    }
+
+    result
 }
 
 #[cfg(test)]

@@ -6,11 +6,15 @@
 //!
 //! HTML tags are stripped with a simple state machine (no full XML
 //! parser — good enough for 99% of real-world EPUB content).
+//! Inline images (<img> tags) are extracted, cached to disk, and
+//! tracked by word_offset so renderers can interleave them.
 
 use crate::doc::Document;
-use crate::types::{Chapter, Word, BookMetadata};
+use crate::types::{Chapter, Word, BookMetadata, ChapterImage};
+use sha2::{Digest, Sha256};
 use std::ffi::CString;
-use std::path::Path;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 /// Parsed EPUB document.
 ///
@@ -26,10 +30,81 @@ pub struct EpubDoc {
     pub chapter_title_cstrings: Vec<CString>,
     /// Pre-built CStrings for full chapter text (per-chapter).
     pub chapter_text_cstrings: Vec<CString>,
+    /// Pre-built C-compatible image info for FFI (per-chapter vectors).
+    /// Pointers into `chapter_image_path_cstrings`.
+    pub chapter_image_c: Vec<Vec<crate::ChapterImageC>>,
+    /// Storage for CString paths referenced by chapter_image_c.
+    pub chapter_image_path_cstrings: Vec<Vec<CString>>,
+}
+
+/// Get the deterministic cache path for a content image.
+fn image_cache_path(epub_path: &str, image_href: &str) -> Option<PathBuf> {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+    let mut hasher = Sha256::new();
+    hasher.update(epub_path.as_bytes());
+    hasher.update(b"\x00");
+    hasher.update(image_href.as_bytes());
+    let hash = format!("{:x}", hasher.finalize());
+    let dir = PathBuf::from(format!("{}/.cache/volta/images", home));
+    fs::create_dir_all(&dir).ok()?;
+    Some(dir.join(format!("{}.png", hash)))
+}
+
+/// Resolve a relative image src against a spine entry's base href.
+///
+/// Example: base="/EPUB/OEBPS/chapter1.xhtml", src="images/foo.png"
+/// → "/EPUB/OEBPS/images/foo.png"
+///
+/// Percent-encodes special characters in the resolved path to match
+/// rbook's manifest href format (+ → %2B, etc.).
+fn resolve_image_src(base_href: &str, src: &str) -> String {
+    // Find the last '/' in base_href to get the directory
+    let dir = match base_href.rfind('/') {
+        Some(pos) => &base_href[..pos],
+        None => "",
+    };
+
+    // Handle relative path components
+    let mut parts: Vec<&str> = dir.split('/').filter(|s| !s.is_empty()).collect();
+    for segment in src.split('/') {
+        match segment {
+            "." | "" => {} // skip empty and current-dir
+            ".." => {
+                parts.pop();
+            }
+            _ => parts.push(segment),
+        }
+    }
+
+    // Build the resolved path, percent-encoding special characters
+    let raw = format!("/{}", parts.join("/"));
+    percent_encode_path(&raw)
+}
+
+/// Percent-encode special characters in a URL path segment.
+/// rbook stores manifest hrefs in percent-encoded form where
+/// characters like + are encoded as %2B.
+fn percent_encode_path(path: &str) -> String {
+    let mut out = String::with_capacity(path.len());
+    for ch in path.chars() {
+        match ch {
+            'A'..='Z' | 'a'..='z' | '0'..='9' | '/' | '-' | '_' | '.' | '~' | '%' => {
+                out.push(ch);
+            }
+            _ => {
+                // Encode as UTF-8 bytes, then %XX per byte
+                let mut buf = [0u8; 4];
+                let encoded = ch.encode_utf8(&mut buf);
+                for byte in encoded.bytes() {
+                    out.push_str(&format!("%{:02X}", byte));
+                }
+            }
+        }
+    }
+    out
 }
 
 impl EpubDoc {
-    /// Decode common HTML entities in a string.
     ///
     /// Handles named entities (&amp;, &lt;, &gt;, &quot;, &apos;, &nbsp;,
     /// &mdash;, &ndash;, &ldquo;, &rdquo;, &lsquo;, &rsquo;, &hellip;)
@@ -99,6 +174,10 @@ impl EpubDoc {
     /// This reads every spine entry sequentially via `rbook::EpubReader`,
     /// strips HTML, tokenizes into words, and pre-allocates CStrings.
     /// For a typical novel (~100K words) this takes < 100ms.
+    ///
+    /// Inline <img> tags are extracted, cached to
+    /// `~/.cache/volta/images/<sha256>.png`, and tracked by word_offset
+    /// in each Chapter.
     pub fn open(path: &Path) -> Result<Self, String> {
         let epub =
             rbook::Epub::open(path).map_err(|e| format!("Failed to open EPUB: {}", e))?;
@@ -123,16 +202,21 @@ impl EpubDoc {
         // --- content extraction ---
         // EpubReader walks the spine in reading order, yielding one
         // EpubReaderContent per spine entry.
+        let manifest = epub.manifest();
         let mut reader = epub.reader();
         let mut words = Vec::new();
         let mut chapters = Vec::new();
         let mut ci: u32 = 0;
+        let epub_path_str = path.to_string_lossy().to_string();
 
         while let Some(content_result) = reader.read_next() {
             let content = content_result
                 .map_err(|e| format!("Failed to read chapter: {}", e))?;
             let raw_text = content.content();       // &str — the XHTML body
             let spine_entry = content.spine_entry(); // metadata for this entry
+
+            // Get the base href of this spine entry for image path resolution
+            let base_href = content.manifest_entry().href().to_string();
 
             // Chapter titles come from the spine idref (internal EPUB ID).
             // Most EPUBs use human-readable IDs like "chapter-1"; fall back
@@ -164,11 +248,14 @@ impl EpubDoc {
                 raw_text.into()
             };
 
-            // --- HTML stripping ---
+            // --- HTML stripping + image extraction ---
             // Character-level state machine: tag contents are captured so
             // block-level closing tags (</p>, </div>, headings, <br>, ...)
-            // can emit paragraph breaks. Does NOT handle CDATA, comments,
-            // or script/style blocks — assume EPUB content is clean XHTML.
+            // can emit paragraph breaks. <img> tags are captured for image
+            // extraction.
+            //
+            // We track images with their character position in clean_text,
+            // then compute word_offset after whitespace normalization.
             const BLOCK_TAGS: &[&str] = &[
                 "/p", "/div", "/h1", "/h2", "/h3", "/h4", "/h5", "/h6", "/li",
                 "/blockquote", "/section", "/article", "/tr", "br", "br/",
@@ -179,6 +266,7 @@ impl EpubDoc {
             let mut tag_buf = String::new();
             // Content of these blocks is code, not prose — drop it entirely.
             let mut skip_block: Option<&'static str> = None;
+
             for ch in raw_text.chars() {
                 match ch {
                     '<' => {
@@ -202,7 +290,9 @@ impl EpubDoc {
                             clean_text.push_str("\n\n");
                         }
                     }
-                    _ if in_tag => tag_buf.push(ch),
+                    _ if in_tag => {
+                        tag_buf.push(ch);
+                    }
                     _ => {
                         if skip_block.is_none() {
                             clean_text.push(ch);
@@ -225,6 +315,94 @@ impl EpubDoc {
                 .filter(|p| !p.is_empty())
                 .collect::<Vec<_>>()
                 .join("\n\n");
+            // --- compute word_offsets for images ---
+            // Images are detected and extracted by scanning the raw
+            // comment-stripped XHTML for <img> tags and resolving src
+            // attributes against the spine entry's base href.
+            let mut chapter_images: Vec<ChapterImage> = Vec::new();
+
+            // Re-extract images from raw_text (post-comment-stripping)
+            let stripped_raw = {
+                let mut s = String::with_capacity(raw_text.len());
+                let mut rest: &str = &raw_text;
+                while let Some(start) = rest.find("<!--") {
+                    s.push_str(&rest[..start]);
+                    rest = match rest[start..].find("-->") {
+                        Some(end) => &rest[start + end + 3..],
+                        None => "",
+                    };
+                }
+                s.push_str(rest);
+                s
+            };
+
+            // Find all <img ...> tags in the stripped raw text
+            {
+                let search = stripped_raw.as_str();
+                let mut pos = 0usize;
+                while let Some(tag_start) = search[pos..].find("<img") {
+                    let abs_start = pos + tag_start;
+                    // Find closing >
+                    let after_tag = &search[abs_start..];
+                    if let Some(tag_end) = after_tag.find('>') {
+                        let tag_content = &after_tag[..tag_end + 1];
+                        let tag_lower = tag_content.to_ascii_lowercase();
+                        if let Some(src_start) = tag_lower.find("src=") {
+                            let rest = &tag_content[src_start + 4..];
+                            let quote_char = rest.chars().next().unwrap_or('"');
+                            if quote_char == '"' || quote_char == '\'' {
+                                if let Some(src_end) = rest[1..].find(quote_char) {
+                                    let src = &rest[1..src_end + 1];
+                                    let resolved = resolve_image_src(&base_href, src);
+
+                                    // Count words in raw text up to abs_start
+                                    let prefix = &search[..abs_start];
+                                    let word_offset = prefix.split_whitespace().count();
+
+                                    // Extract and cache the image
+                                    if let Some(cache_path) =
+                                        image_cache_path(&epub_path_str, &resolved)
+                                    {
+                                        if !cache_path.exists() {
+                                            if let Some(entry) = manifest.by_href(&resolved) {
+                                                if let Ok(bytes) = entry.read_bytes() {
+                                                    if let Ok(img) = image::load_from_memory(&bytes)
+                                                    {
+                                                        let _ = img.save(&cache_path);
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        // Get dimensions
+                                        let (w, h) = if cache_path.exists() {
+                                            image::ImageReader::new(std::io::Cursor::new(
+                                                &fs::read(&cache_path).unwrap_or_default(),
+                                            ))
+                                            .with_guessed_format()
+                                            .ok()
+                                            .and_then(|r| r.into_dimensions().ok())
+                                            .unwrap_or((0, 0))
+                                        } else {
+                                            (0, 0)
+                                        };
+
+                                        chapter_images.push(ChapterImage {
+                                            word_offset,
+                                            cached_path: cache_path.to_string_lossy().to_string(),
+                                            width: w,
+                                            height: h,
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                        pos = abs_start + tag_end + 1;
+                    } else {
+                        break;
+                    }
+                }
+            }
 
             // --- word tokenization ---
             // Each word is tagged with its chapter index so
@@ -238,6 +416,7 @@ impl EpubDoc {
             chapters.push(Chapter {
                 title: chapter_title,
                 text: clean_text,
+                images: chapter_images,
             });
 
             ci += 1;
@@ -257,6 +436,27 @@ impl EpubDoc {
             .map(|c| CString::new(c.text.as_str()).unwrap_or_default())
             .collect();
 
+        // --- pre-build C image data for FFI ---
+        let mut chapter_image_c: Vec<Vec<crate::ChapterImageC>> = Vec::new();
+        let mut chapter_image_path_cstrings: Vec<Vec<CString>> = Vec::new();
+        for ch in &chapters {
+            let mut c_images = Vec::new();
+            let mut c_paths = Vec::new();
+            for img in &ch.images {
+                let c_path = CString::new(img.cached_path.as_str()).unwrap_or_default();
+                let c_ptr = c_path.as_ptr();
+                c_paths.push(c_path);
+                c_images.push(crate::ChapterImageC {
+                    word_offset: img.word_offset as u32,
+                    cached_path: c_ptr,
+                    width: img.width,
+                    height: img.height,
+                });
+            }
+            chapter_image_c.push(c_images);
+            chapter_image_path_cstrings.push(c_paths);
+        }
+
         Ok(EpubDoc {
             metadata,
             words,
@@ -264,6 +464,8 @@ impl EpubDoc {
             chapters,
             chapter_title_cstrings,
             chapter_text_cstrings,
+            chapter_image_c,
+            chapter_image_path_cstrings,
         })
     }
 }

@@ -6,7 +6,7 @@ license = "MIT"
 
 [features]
 default = ["tui"]
-tui = ["ratatui", "crossterm", "unicode-width"]
+tui = ["ratatui", "crossterm", "unicode-width", "arboard"]
 
 [lib]
 name = "volta_core"
@@ -30,6 +30,7 @@ pdf-extract = "0.9"
 ratatui = { version = "0.29", optional = true }
 crossterm = { version = "0.28", optional = true }
 unicode-width = { version = "0.1", optional = true }
+arboard = { version = "3", optional = true }
 
 # Android PDF rendering
 [target.'cfg(target_os = "android")'.dependencies]

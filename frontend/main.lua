@@ -107,8 +107,22 @@ function love.textinput(t)
 end
 
 function love.mousepressed(x, y, button, istouch, presses)
-  if mode == "menu" then
+  if mode == "reader" then
+    require("reader.reader"):mousepressed(x, y, button, istouch, presses)
+  elseif mode == "menu" then
     require("ui.menu"):mousepressed(x, y, button, istouch, presses)
+  end
+end
+
+function love.mousereleased(x, y, button, istouch, presses)
+  if mode == "reader" then
+    require("reader.reader"):mousereleased(x, y, button, istouch, presses)
+  end
+end
+
+function love.mousemoved(x, y, dx, dy, istouch)
+  if mode == "reader" then
+    require("reader.reader"):mousemoved(x, y, dx, dy, istouch)
   end
 end
 

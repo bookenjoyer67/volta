@@ -131,6 +131,26 @@ function M:chapter_text(i)
   return ffi.string(ptr)
 end
 
+--- Number of inline images in chapter `i` (0 for non-EPUB docs).
+function M:chapter_image_count(i)
+  if not self.doc then return 0 end
+  return bridge.rsvp.rsvp_chapter_image_count(self.doc, i)
+end
+
+--- Get info for image `idx` in chapter `i`.
+-- Returns {word_offset, path, width, height} or nil if out of bounds.
+function M:chapter_image_at(i, idx)
+  if not self.doc then return nil end
+  local ptr = bridge.rsvp.rsvp_chapter_image_at(self.doc, i, idx)
+  if ptr == nil then return nil end
+  return {
+    word_offset = tonumber(ptr.word_offset) or 0,
+    path = ffi.string(ptr.cached_path),
+    width = tonumber(ptr.width) or 0,
+    height = tonumber(ptr.height) or 0,
+  }
+end
+
 -- ── RSVP player controls ─────────────────────────────────────
 
 function M:seek(i)

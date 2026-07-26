@@ -22,10 +22,27 @@ pub struct Word {
 ///
 /// `text` is the full plain-text content after HTML stripping
 /// and whitespace normalization.
+/// `images` lists inline images positioned by word offset.
 #[derive(Debug, Clone)]
 pub struct Chapter {
     pub title: String,
     pub text: String,
+    pub images: Vec<ChapterImage>,
+}
+
+/// An inline image extracted from EPUB content.
+///
+/// `word_offset` is the position in this chapter's word stream
+/// where the image should be rendered (0 = before first word).
+#[derive(Debug, Clone)]
+pub struct ChapterImage {
+    /// Word index where this image appears in the text flow.
+    pub word_offset: usize,
+    /// Absolute path to the cached image file (PNG).
+    pub cached_path: String,
+    /// Original image dimensions in pixels.
+    pub width: u32,
+    pub height: u32,
 }
 
 /// Minimal book-level metadata extracted at open time.

@@ -35,7 +35,7 @@ M.cursor_word = 0
 M._gg_timer = 0  -- time of last 'g' press for gg detection
 M._gt_timer = 0  -- time of last 'g' press for gt chord detection
 M._line_word_x = {}  -- _line_word_x[line_i] = {word1_x, word2_x, ...} per-word x-offsets
-M._save_flash = 0   -- seconds remaining for "Saved" confirmation
+M._flash = {0, ""}  -- {seconds, message} for status-bar flash
 
 -- Search state
 M.search_query = ""
@@ -45,6 +45,15 @@ M.search_idx = 0
 M.has_matches = false      -- matches exist, n/N navigate them
 M.jump_stack = {}          -- {{chapter, cursor_word}, ...} for Ctrl+o back
 M._needs_reflow = false    -- reflow needed on next draw
+
+-- Inline image state
+M._images = {}            -- { {word_offset, love_image, w, h, orig_w, orig_h}, ... }
+M._image_y_offsets = {}   -- line_idx -> extra_y_pixels (cumulative image heights before this line)
+
+-- Selection state
+M.selection_anchor = nil  -- nil = no selection, number = anchor word index
+M.visual_line_mode = false
+M._mouse_dragging = false  -- true while LMB is held for selection
 
 function M:init()
   M.font_size = config.theme.reader.font_size or 18
@@ -82,6 +91,9 @@ function M:enter()
   else
     M.cursor_word = M.line_word_offsets[1] or 0
   end
+
+  -- Load inline images for this chapter
+  M:_load_images()
 end
 
 --- Reflow chapter text into wrapped lines and track word offsets.
@@ -196,6 +208,95 @@ function M:_scroll_to_cursor()
     M.scroll_y = math.max(0, line_y - M.line_height)
   elseif line_y + M.line_height > visible_bottom then
     M.scroll_y = line_y + M.line_height - h + M._header_h + M.line_height
+  end
+end
+
+--- Load inline images for the current chapter from the FFI bridge.
+function M:_load_images()
+  M._images = {}
+  M._image_y_offsets = {}
+
+  if not book:is_loaded() then return end
+  local count = book:chapter_image_count(M.current_chapter)
+  if count == 0 then return end
+
+  local avail = love.graphics.getWidth() - M.margin * 2
+  local max_width = (M.max_col_width > 0)
+    and math.min(avail, M.max_col_width) or avail
+
+  for i = 0, count - 1 do
+    local info = book:chapter_image_at(M.current_chapter, i)
+    if info and info.path then
+      -- Check if file exists
+      local f = io.open(info.path, "r")
+      if f then
+        f:close()
+        local ok, img = pcall(love.graphics.newImage, info.path)
+        if ok and img then
+          local iw, ih = img:getWidth(), img:getHeight()
+          -- Scale to fit within text width, max 400px height
+          local scale = math.min(max_width / math.max(1, iw), 400 / math.max(1, ih), 1.0)
+          local dw = iw * scale
+          local dh = ih * scale
+          table.insert(M._images, {
+            word_offset = info.word_offset,
+            img = img,
+            w = dw,
+            h = dh,
+            orig_w = iw,
+            orig_h = ih,
+          })
+        end
+      end
+    end
+  end
+
+  -- Sort by word_offset
+  table.sort(M._images, function(a, b) return a.word_offset < b.word_offset end)
+
+  -- Build y-offset map: for each image, find the line index
+  -- where it should appear, and compute cumulative extra height
+  M:_build_image_offsets()
+end
+
+--- Compute per-line vertical offsets from inline images.
+-- Each image before a line pushes that line and all following lines down.
+function M:_build_image_offsets()
+  M._image_y_offsets = {}
+  if #M._images == 0 then return end
+
+  local line_count = #M.wrapped_lines
+
+  -- First pass: assign each image to the line containing its word_offset
+  for _, img in ipairs(M._images) do
+    local wo = img.word_offset
+    local best_line = 1
+    for li = 1, line_count do
+      local start_wo = M.line_word_offsets[li] or 0
+      if start_wo <= wo then
+        best_line = li
+      else
+        break
+      end
+    end
+    -- Image appears before this line's first word
+    img._line = best_line
+  end
+
+  -- Second pass: compute cumulative y-offset per line
+  -- Sort images by line index
+  table.sort(M._images, function(a, b) return a._line < b._line end)
+
+  local cumulative_h = 0
+  local img_idx = 1
+
+  for line_i = 1, line_count do
+    while img_idx <= #M._images and M._images[img_idx]._line == line_i do
+      local img = M._images[img_idx]
+      cumulative_h = cumulative_h + img.h + M.line_height * 0.5
+      img_idx = img_idx + 1
+    end
+    M._image_y_offsets[line_i] = cumulative_h
   end
 end
 
@@ -361,9 +462,53 @@ function M:draw()
   -- Text content
   local match_set = M:_match_set()
   local y = M._header_h - M.scroll_y
+  local max_text_width = (M.max_col_width > 0)
+    and M.max_col_width or (w - M.margin * 2)
+  local img_idx = 1
+
   for i, line in ipairs(M.wrapped_lines) do
-    local ly = y + (i - 1) * M.line_height
+    -- Apply image vertical offset for this line
+    local img_offset = M._image_y_offsets[i] or 0
+    local ly = y + (i - 1) * M.line_height + img_offset
+
+    -- Render images that appear before this line
+    while img_idx <= #M._images and M._images[img_idx]._line == i do
+      local img_data = M._images[img_idx]
+      local img_y = ly - img_data.h - M.line_height * 0.5
+      local img_x = M._origin_x + (max_text_width - img_data.w) / 2
+      if img_y + img_data.h > 0 and img_y < h then
+        love.graphics.setColor(1, 1, 1)
+        love.graphics.draw(img_data.img, img_x, img_y, 0, img_data.w / img_data.orig_w, img_data.h / img_data.orig_h)
+      end
+      img_idx = img_idx + 1
+    end
+
     if ly + M.line_height > 0 and ly < h then
+      -- Selection highlighting pass (drawn behind text)
+      if M.selection_anchor then
+        local sel_start = math.min(M.selection_anchor, M.cursor_word)
+        local sel_end = math.max(M.selection_anchor, M.cursor_word)
+        local first_word = M.line_word_offsets[i] or 0
+        local word_count = M:_words_in_line(i)
+        local line_end = first_word + word_count - 1
+        -- Check if this line overlaps the selection range
+        if first_word <= sel_end and line_end >= sel_start then
+          local lead = line:match("^%s*")
+          local x = M._origin_x + M.font:getWidth(lead)
+          local wi = 0
+          for word in line:gmatch("%S+") do
+            local global_idx = first_word + wi
+            wi = wi + 1
+            if global_idx >= sel_start and global_idx <= sel_end then
+              local word_w = M.font:getWidth(word)
+              love.graphics.setColor(0.2, 0.25, 0.45, 0.7)
+              love.graphics.rectangle("fill", x - 1, ly, word_w + 2, M.line_height)
+            end
+            x = x + M.font:getWidth(word) + M.font:getWidth(" ")
+          end
+        end
+      end
+
       if M.has_matches then
         -- Word-by-word rendering with match highlighting
         local lead = line:match("^%s*")
@@ -486,13 +631,13 @@ function M:draw()
   local status_left = config.theme_name .. "  |  / search  |  r RSVP  |  t/T theme  |  Ctrl+S save"
   love.graphics.print(status_left, 10, h - 16)
 
-  -- "Saved" flash
-  if M._save_flash > 0 then
+  -- Status-bar flash (Saved / Yanked / etc.)
+  if M._flash[1] > 0 then
     local dt = math.min(love.timer.getDelta(), 0.05)
-    M._save_flash = M._save_flash - dt
-    local alpha = math.min(1, M._save_flash)
+    M._flash[1] = M._flash[1] - dt
+    local alpha = math.min(1, M._flash[1])
     love.graphics.setColor(0, 1, 0.5, alpha)
-    love.graphics.print("Saved", 10, h - 25)
+    love.graphics.print(M._flash[2], 10, h - 25)
   end
 end
 
@@ -524,6 +669,41 @@ function M:keypressed(key, scancode, isrepeat)
   if key == kb:get("reader_toggle_search") then
     M.search_active = true
     M.search_query = ""
+    return
+  end
+
+  -- ── Yank (copy): y when visual mode active ──
+
+  if key == "y" and M.selection_anchor then
+    M:_yank_selection()
+    return
+  end
+
+  -- ── Visual mode: v = char-wise, V = line-wise ──
+
+  if key == "v" then
+    if M.selection_anchor then
+      M.selection_anchor = nil
+      M.visual_line_mode = false
+    else
+      M.selection_anchor = M.cursor_word
+      M.visual_line_mode = false
+    end
+    return
+  end
+
+  if key == "V" then
+    if M.selection_anchor then
+      M.selection_anchor = nil
+      M.visual_line_mode = false
+    else
+      local line = M:_line_for_word(M.cursor_word)
+      local line_start = M.line_word_offsets[line]
+      local line_end = line_start + (M:_words_in_line(line) - 1)
+      M.selection_anchor = line_start
+      M.cursor_word = line_end
+      M.visual_line_mode = true
+    end
     return
   end
 
@@ -710,7 +890,11 @@ function M:keypressed(key, scancode, isrepeat)
   -- ── Back to menu / clear search ──
 
   elseif key == kb:get("reader_escape") then
-    if M.has_matches then
+    -- Clear selection first, then search matches, then go to menu
+    if M.selection_anchor then
+      M.selection_anchor = nil
+      M.visual_line_mode = false
+    elseif M.has_matches then
       M.has_matches = false
       M.search_matches = {}
       M.search_idx = 0
@@ -801,7 +985,103 @@ function M:_save_progress()
     word_index = book:current_index(),
     wpm = config.wpm,
   })
-  M._save_flash = 1.5  -- show "Saved" for 1.5 seconds
+  M._flash = {1.5, "Saved"}
+end
+
+--- Count words on a wrapped line (by word index i).
+function M:_words_in_line(line_idx)
+  if not M.wrapped_lines[line_idx] then return 0 end
+  local count = 0
+  for _ in M.wrapped_lines[line_idx]:gmatch("%S+") do
+    count = count + 1
+  end
+  return count
+end
+
+--- Build selected text from the current selection range and copy to clipboard.
+function M:_yank_selection()
+  if not M.selection_anchor then return end
+  local start_w = math.min(M.selection_anchor, M.cursor_word)
+  local end_w = math.max(M.selection_anchor, M.cursor_word)
+  local parts = {}
+  for li = 1, #M.wrapped_lines do
+    local first = M.line_word_offsets[li]
+    local words = M:_words_in_line(li)
+    if words > 0 then
+      local last = first + words - 1
+      if first <= end_w and last >= start_w then
+        local line_words = {}
+        local wi = 0
+        for w in M.wrapped_lines[li]:gmatch("%S+") do
+          local global = first + wi
+          wi = wi + 1
+          if global >= start_w and global <= end_w then
+            table.insert(line_words, w)
+          end
+        end
+        if #line_words > 0 then
+          table.insert(parts, table.concat(line_words, " "))
+        end
+      end
+    end
+  end
+  local text = table.concat(parts, " ")
+  if text ~= "" then
+    love.system.setClipboard(text)
+  end
+  M.selection_anchor = nil
+  M.visual_line_mode = false
+  M._flash = {1.5, "Yanked"}
+end
+
+--- Find which word index is at screen position (x, y), or nil if none.
+function M:_word_at_position(x, y)
+  local line_idx = math.floor((y - M._header_h + M.scroll_y) / M.line_height) + 1
+  if line_idx < 1 or line_idx > #M.wrapped_lines then return nil end
+  local offsets = M._line_word_x[line_idx]
+  if not offsets then return nil end
+  local words = {}
+  for w in M.wrapped_lines[line_idx]:gmatch("%S+") do table.insert(words, w) end
+  for i = #offsets, 1, -1 do
+    if offsets[i] <= (x - M._origin_x) then
+      return (M.line_word_offsets[line_idx] or 0) + i - 1
+    end
+  end
+  return M.line_word_offsets[line_idx] or 0
+end
+
+--- Mouse press: start selection on left click.
+function M:mousepressed(x, y, button, istouch, presses)
+  if button ~= 1 then return end
+  local word_idx = M:_word_at_position(x, y)
+  if word_idx then
+    M.selection_anchor = word_idx
+    M.cursor_word = word_idx
+    M._mouse_dragging = true
+  end
+end
+
+--- Mouse release: finish selection drag.
+function M:mousereleased(x, y, button, istouch, presses)
+  if button == 1 then
+    M._mouse_dragging = false
+  end
+end
+
+--- Mouse move: extend selection while dragging.
+function M:mousemoved(x, y, dx, dy, istouch)
+  if not M._mouse_dragging or not M.selection_anchor then return end
+  local word_idx = M:_word_at_position(x, y)
+  if word_idx then
+    M.cursor_word = word_idx
+    -- Auto-scroll when near top/bottom edges
+    local h = love.graphics.getHeight()
+    if y < M._header_h + 30 then
+      M.scroll_y = math.max(0, M.scroll_y - M.line_height * 2)
+    elseif y > h - 30 then
+      M.scroll_y = M.scroll_y + M.line_height * 2
+    end
+  end
 end
 
 return M

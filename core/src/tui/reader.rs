@@ -34,6 +34,10 @@ pub struct ReaderState {
     pub last_visible_height: usize,
     /// Inputs of the last reflow: (chapter, width, margin, max_col_width).
     reflow_key: Option<(usize, u16, u16, u16)>,
+    /// Visual selection anchor (None = not in visual mode).
+    pub selection_anchor: Option<usize>,
+    /// When true, selection is line-wise (V instead of v).
+    pub visual_line_mode: bool,
 }
 
 impl ReaderState {
@@ -51,6 +55,8 @@ impl ReaderState {
             content_width: 0,
             last_visible_height: 20,
             reflow_key: None,
+            selection_anchor: None,
+            visual_line_mode: false,
         };
         state.reflow(doc, 80);
         state
@@ -189,7 +195,7 @@ impl ReaderState {
                 let word_end = word_start + word.len();
 
                 let style = if global_word == self.cursor_word {
-                    // Cursor word
+                    // Cursor word — brightest
                     Style::default()
                         .fg(theme.cursor)
                         .bg(Color::Rgb(60, 20, 50))
@@ -198,6 +204,16 @@ impl ReaderState {
                     Style::default()
                         .fg(Color::Rgb(255, 200, 50))
                         .bg(Color::Rgb(50, 40, 10))
+                } else if let Some(anchor) = self.selection_anchor {
+                    let start = anchor.min(self.cursor_word);
+                    let end = anchor.max(self.cursor_word);
+                    if global_word >= start && global_word <= end {
+                        Style::default()
+                            .fg(theme.text)
+                            .bg(Color::Rgb(40, 50, 80))
+                    } else {
+                        Style::default().fg(theme.text)
+                    }
                 } else {
                     Style::default().fg(theme.text)
                 };

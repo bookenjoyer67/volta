@@ -4,7 +4,7 @@
 //! DocEnum dispatcher in lib.rs treat them uniformly without
 //! caring about format-specific details.
 
-use crate::types::Word;
+use crate::types::{Word, ChapterImage};
 
 /// Common read-only interface over EPUB and PDF documents.
 ///
@@ -28,4 +28,9 @@ pub trait Document {
 
     /// Full plain-text content of chapter `i`.
     fn chapter_text(&self, i: u32) -> &str;
+
+    /// Inline images for chapter `i` (EPUB only; other formats return empty).
+    fn chapter_images(&self, _i: u32) -> &[ChapterImage] {
+        &[]
+    }
 }
