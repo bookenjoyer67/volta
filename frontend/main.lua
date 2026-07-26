@@ -162,17 +162,4 @@ end
 
 --- Save progress on quit.
 function love.quit()
-  -- Save reader position if a book is open
-  if book:is_loaded() then
-    local reader = require("reader.reader")
-    local entry = {
-      chapter = reader.current_chapter,
-      scroll_y = reader.scroll_y,
-      cursor_word = reader.cursor_word,
-      word_index = book:current_index(),
-      wpm = config.wpm,
-    }
-    progress:save(book.file_path, entry)
-  end
-  progress:flush()
 end
