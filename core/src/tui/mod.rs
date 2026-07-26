@@ -1218,6 +1218,9 @@ pub fn run(mut app: App) -> io::Result<()> {
         app.tick();
     }
 
+    // Save progress on exit
+    app.save_progress();
+
     crossterm::terminal::disable_raw_mode()?;
     crossterm::execute!(
         terminal.backend_mut(),
