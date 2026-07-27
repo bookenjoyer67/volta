@@ -167,7 +167,10 @@ impl DocEnum {
 fn add_to_library(doc: &dyn Document, path: &Path, format: &str) {
     use crate::library::{Library, LibraryEntry};
     let mut library = Library::load();
-    let path_s = path.to_string_lossy();
+    // Canonicalize to absolute path so the library entry always resolves
+    let path_s = path.canonicalize()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|_| path.to_string_lossy().to_string());
     let cover_path = crate::cover::extract_cover(&path_s, format);
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

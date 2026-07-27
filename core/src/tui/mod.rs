@@ -1002,6 +1002,10 @@ fn cursor_down(state: &mut ReaderState) {
 
 /// Add or update a book in the library from its Document trait.
 fn add_to_library(library: &mut Library, path: &str, doc: &dyn Document) {
+    // Canonicalize to absolute path so the library entry always resolves
+    let path = std::fs::canonicalize(path)
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|_| path.to_string());
     let format = if path.ends_with(".epub") {
         "epub"
     } else if path.ends_with(".pdf") {
