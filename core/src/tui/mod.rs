@@ -1098,7 +1098,6 @@ fn kitty_config_font_size() -> f32 {
         }
     }
 
-    eprintln!("font_size not found in config, using fallback {fallback}");
     fallback
 }
 
