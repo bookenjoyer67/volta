@@ -65,6 +65,12 @@ debian:   sudo apt install love rustc cargo poppler-utils zenity
 fedora:   sudo dnf install love rust cargo poppler-utils zenity
 ```
 
+It is recommended that you use kitty as this was designed for kitty. I have not used it on any other terminal emulator yet. If you want it to work use kitty. 
+In your kitty.conf file:
+```
+allow_remote_control yes
+```
+This way the text zoom will work properly when entering and exiting RSVP mode. Otherwise you should be good to go.
 ### Build
 
 ```bash
@@ -147,6 +153,7 @@ One word at a time, centered, adjustable speed. Pure reading flow.
 | `s` | Toggle stats overlay |
 | `t` / `T` | Next / previous theme |
 | `Esc` | Return to reader |
+
 
 Full keybindings: [KEYBINDINGS.md](KEYBINDINGS.md)
 
