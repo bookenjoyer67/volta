@@ -660,6 +660,7 @@ impl App {
                     doc.player_mut().seek(idx as u32);
                     doc.player_mut().play();
                     self.last_tick = Instant::now();
+                    zoom_terminal(6); // zoom in for RSVP
                     self.mode = Mode::Rsvp(RsvpState::new());
                 }
             }
@@ -848,6 +849,7 @@ impl App {
                 reader.chapter = ch;
                 reader.cursor_word = cursor;
                 reader.scroll_to_cursor();
+                zoom_terminal(-6); // zoom back out
                 self.mode = Mode::Reader(reader);
             }
             RsvpAction::Quit => {
@@ -1064,6 +1066,16 @@ fn word_byte_starts(text: &str) -> Vec<usize> {
         }
     }
     starts
+}
+
+/// Zoom terminal font size for RSVP mode (Kitty relative change).
+/// Positive = zoom in, negative = zoom out.
+fn zoom_terminal(delta: i32) {
+    let sign = if delta >= 0 { "+" } else { "-" };
+    let value = delta.abs();
+    let _ = std::process::Command::new("kitty")
+        .args(&["@", "set-font-size", &format!("{sign}{value}")])
+        .output();
 }
 
 /// Build a plain-text string from a word range spanning wrapped lines.
