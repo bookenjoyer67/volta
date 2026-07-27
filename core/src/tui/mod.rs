@@ -33,6 +33,7 @@ use std::io;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
+
 pub enum Mode {
     Menu(MenuState),
     Reader(ReaderState),
@@ -660,7 +661,7 @@ impl App {
                     doc.player_mut().seek(idx as u32);
                     doc.player_mut().play();
                     self.last_tick = Instant::now();
-                    zoom_terminal(20); // zoom in for RSVP
+                    zoom_terminal(true);
                     self.mode = Mode::Rsvp(RsvpState::new());
                 }
             }
@@ -849,11 +850,12 @@ impl App {
                 reader.chapter = ch;
                 reader.cursor_word = cursor;
                 reader.scroll_to_cursor();
-                zoom_terminal(-6); // zoom back out
+                zoom_terminal(false);
                 self.mode = Mode::Reader(reader);
             }
             RsvpAction::Quit => {
                 doc.player_mut().pause();
+                zoom_terminal(false);
                 self.should_quit = true;
             }
         }
@@ -1067,25 +1069,58 @@ fn word_byte_starts(text: &str) -> Vec<usize> {
     }
     starts
 }
+use std::path::PathBuf;
 
-/// Zoom terminal font size for RSVP mode (Kitty relative change).
-/// Positive = zoom in, negative = zoom out.
-fn zoom_terminal(delta: i32) {
-    let sign = if delta >= 0 { "+" } else { "-" };
-    let value = delta.abs();
-    match std::process::Command::new("kitty")
-        .args(&["@", "set-font-size", &format!("{sign}{value}")])
-        .output()
-    {
-        Ok(out) if !out.status.success() => {
-            eprintln!("zoom: kitty @ set-font-size failed: {}",
-                String::from_utf8_lossy(&out.stderr));
+fn kitty_config_font_size() -> f32 {
+    // Default fallback
+    let fallback = 12.0;
+
+    let config_path = dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".config/kitty/kitty.conf");
+
+    let content = match std::fs::read_to_string(&config_path) {
+        Ok(c) => c,
+        Err(_) => {
+            eprintln!("Could not read kitty config, using fallback {fallback}");
+            return fallback;
         }
-        Err(e) => eprintln!("zoom: kitty not found: {e}"),
-        _ => {}
+    };
+
+    for line in content.lines() {
+        let line = line.trim();
+        if line.starts_with("font_size") {
+            // format: font_size 14.0
+            if let Some(val) = line.split_whitespace().nth(1) {
+                if let Ok(v) = val.parse::<f32>() {
+                    return v;
+                }
+            }
+        }
     }
+
+    eprintln!("font_size not found in config, using fallback {fallback}");
+    fallback
 }
 
+fn zoom_terminal(zoom_in: bool) {
+    let original = kitty_config_font_size();
+    let target = if zoom_in {
+        format!("{:.1}", original + 20.0)
+    } else {
+        format!("{:.1}", original)
+    };
+
+    let status = std::process::Command::new("kitty")
+        .args(["@", "set-font-size", &target])
+        .status();
+
+    if let Err(e) = status {
+        eprintln!("Failed to set font size to {target}: {e}");
+    } else {
+        eprintln!("Font size set to {target}");
+    }
+}
 /// Build a plain-text string from a word range spanning wrapped lines.
 /// word range is inclusive: [start_word, end_word].
 /// Strips the 4-space paragraph indent from yanked text.
