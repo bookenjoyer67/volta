@@ -116,25 +116,31 @@ impl PdfDoc {
     ///
     /// Tries pages 1, 2, 3, ... until pdftotext fails, then returns
     /// the last successful page number.  Caps at 10,000.
-    fn count_pages(file_path: &str) -> Result<u32, String> {
-        for n in 1u32..10000 {
-            let status = Command::new("pdftotext")
-                .args(&[
-                    "-f", &n.to_string(),
-                    "-l", &n.to_string(),
-                    file_path, "-",
-                ])
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .status()
-                .map_err(|e| format!("Failed to run pdftotext: {}", e))?;
+fn count_pages(file_path: &str) -> Result<u32, String> {
+    let output = Command::new("pdfinfo")
+        .arg(file_path)
+        .output()
+        .map_err(|e| format!("Failed to run pdfinfo: {}", e))?;
 
-            if !status.success() {
-                return Ok(n - 1);
-            }
-        }
-        Ok(10000) // safety cap
+    if !output.status.success() {
+        return Err(format!(
+            "pdfinfo failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
     }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for line in stdout.lines() {
+        if line.starts_with("Pages:") {
+            let count_str = line
+                .split_whitespace()
+                .nth(1)
+                .ok_or("Missing page count")?;
+            return count_str.parse().map_err(|e| format!("Invalid page count: {}", e));
+        }
+    }
+    Err("Could not find page count in pdfinfo output".to_string())
+}
 
     /// Deterministic cache path: `~/.cache/volta/<sha256>/`.
     fn cache_dir(file_path: &str) -> Result<PathBuf, String> {
