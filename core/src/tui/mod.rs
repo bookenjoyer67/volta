@@ -660,7 +660,7 @@ impl App {
                     doc.player_mut().seek(idx as u32);
                     doc.player_mut().play();
                     self.last_tick = Instant::now();
-                    zoom_terminal(6); // zoom in for RSVP
+                    zoom_terminal(20); // zoom in for RSVP
                     self.mode = Mode::Rsvp(RsvpState::new());
                 }
             }
@@ -1073,9 +1073,17 @@ fn word_byte_starts(text: &str) -> Vec<usize> {
 fn zoom_terminal(delta: i32) {
     let sign = if delta >= 0 { "+" } else { "-" };
     let value = delta.abs();
-    let _ = std::process::Command::new("kitty")
+    match std::process::Command::new("kitty")
         .args(&["@", "set-font-size", &format!("{sign}{value}")])
-        .output();
+        .output()
+    {
+        Ok(out) if !out.status.success() => {
+            eprintln!("zoom: kitty @ set-font-size failed: {}",
+                String::from_utf8_lossy(&out.stderr));
+        }
+        Err(e) => eprintln!("zoom: kitty not found: {e}"),
+        _ => {}
+    }
 }
 
 /// Build a plain-text string from a word range spanning wrapped lines.
