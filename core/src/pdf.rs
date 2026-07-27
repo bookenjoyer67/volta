@@ -112,10 +112,9 @@ impl PdfDoc {
         })
     }
 
-    /// Count pages by binary-searching pdftotext page range.
-    ///
-    /// Tries pages 1, 2, 3, ... until pdftotext fails, then returns
-    /// the last successful page number.  Caps at 10,000.
+    ///PDF with pre-extracted and tokenized text
+    ///Page count is gathered with 'pdfinfo', text with 'pdftotext'
+    /// Words are tokenized up front and stored as "chapters"
 fn count_pages(file_path: &str) -> Result<u32, String> {
     let output = Command::new("pdfinfo")
         .arg(file_path)
