@@ -1082,8 +1082,7 @@ fn kitty_config_font_size() -> f32 {
     let content = match std::fs::read_to_string(&config_path) {
         Ok(c) => c,
         Err(_) => {
-            eprintln!("Could not read kitty config, using fallback {fallback}");
-            return fallback;
+             return fallback;
         }
     };
 
