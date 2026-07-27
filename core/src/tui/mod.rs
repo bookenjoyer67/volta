@@ -853,11 +853,6 @@ impl App {
                 zoom_terminal(false);
                 self.mode = Mode::Reader(reader);
             }
-            RsvpAction::Quit => {
-                doc.player_mut().pause();
-                zoom_terminal(false);
-                self.should_quit = true;
-            }
         }
     }
 }

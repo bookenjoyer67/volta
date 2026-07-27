@@ -241,7 +241,6 @@ pub enum RsvpAction {
     ThemeNext,
     ThemePrev,
     ExitToReader,
-    Quit,
 }
 
 impl RsvpAction {
@@ -260,7 +259,6 @@ impl RsvpAction {
             }
             KeyCode::Char('T') => RsvpAction::ThemePrev,
             KeyCode::Esc => RsvpAction::ExitToReader,
-            KeyCode::Char('q') => RsvpAction::Quit,
             _ => RsvpAction::None,
         }
     }
@@ -309,7 +307,7 @@ impl MenuAction {
             KeyCode::Char('o') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 MenuAction::Browse
             }
-            KeyCode::Esc | KeyCode::Char('q') => MenuAction::Quit,
+            KeyCode::Esc => MenuAction::Quit,
             KeyCode::Delete => MenuAction::Delete,
             _ => MenuAction::None,
         }
