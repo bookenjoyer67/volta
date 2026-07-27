@@ -1023,16 +1023,16 @@ fn add_to_library(library: &mut Library, path: &str, doc: &dyn Document) {
         .as_secs();
 
     // Extract cover thumbnail (async-friendly — cached on disk)
-    let cover_path = volta_core::cover::extract_cover(path, format);
+    let cover_path = volta_core::cover::extract_cover(&path, format);
 
     // Preserve existing progress so opening doesn't reset saved position
     let (saved_ch, saved_cw) = library
-        .get(path)
+        .get(&path)
         .map(|e| (e.current_chapter, e.current_word))
         .unwrap_or((0, 0));
 
     library.upsert(
-        path,
+        &path,
         LibraryEntry {
             title,
             author: String::new(),
