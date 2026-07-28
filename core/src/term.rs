@@ -23,7 +23,7 @@ pub enum TermKind {
     Foot,
     Xterm,
     Generic,
-    Ghosty,
+    Ghostty,
 }
 
 impl Term {
@@ -55,8 +55,8 @@ impl Term {
             if term.contains("foot") {
                 return TermKind::Foot;
             }
-            if term.contains("ghosty") {
-                return TermKind::Ghosty;
+            if term.contains("ghostty") {
+                return TermKind::Ghostty;
             }
         }
         // WezTerm sets TERM_PROGRAM
