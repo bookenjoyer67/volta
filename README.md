@@ -199,6 +199,4 @@ Deep dive: [ARCHITECTURE.md](ARCHITECTURE.md)
 
 ---
 
-<p align="center">
-  <sub>Built for people who actually read.</sub>
 </p>
