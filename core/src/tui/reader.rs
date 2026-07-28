@@ -293,11 +293,7 @@ impl ReaderState {
         let current_page = (self.scroll / visible.max(1)) + 1;
         let chapter_pct = {
             let total = self.line_word_offsets.last().copied().unwrap_or(0);
-            if total > 0 {
-                (self.cursor_word * 100) / total
-            } else {
-                100
-            }
+            total.checked_div(1).map(|_| (self.cursor_word * 100) / total).unwrap_or(100)
         };
 
         let status = if !search_matches.is_empty() {

@@ -150,8 +150,7 @@ impl EpubDoc {
                         }
                         None => {
                             // Try numeric entity: &#NNNN;
-                            if entity.starts_with('#') {
-                                let num_str = &entity[1..]; // skip '#'
+                            if let Some(num_str) = entity.strip_prefix('#') {
                                 if let Ok(n) = num_str.parse::<u32>() {
                                     if let Some(c) = char::from_u32(n) {
                                         out.push(c);

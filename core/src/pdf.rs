@@ -45,7 +45,7 @@ impl PdfDoc {
 
         // Extract all text in one pass with -layout for positional fidelity.
         let output = Command::new("pdftotext")
-            .args(&["-layout", &file_path, "-"])
+            .args(["-layout", &file_path, "-"])
             .output()
             .map_err(|e| format!("Failed to run pdftotext: {}", e))?;
 
@@ -171,7 +171,7 @@ fn count_pages(file_path: &str) -> Result<u32, String> {
 
         // -singlefile: output one PNG, not page-NN.png
         let output = Command::new("pdftoppm")
-            .args(&[
+            .args([
                 "-f", &page.to_string(),
                 "-l", &page.to_string(),
                 "-r", &dpi.to_string(),

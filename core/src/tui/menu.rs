@@ -175,7 +175,7 @@ impl MenuState {
     /// Spawn zenity file picker, return chosen path if any.
     pub fn browse_file() -> Option<PathBuf> {
         let output = std::process::Command::new("zenity")
-            .args(&["--file-selection", "--title=Open Book"])
+            .args(["--file-selection", "--title=Open Book"])
             .output()
             .ok()?;
         if output.status.success() {

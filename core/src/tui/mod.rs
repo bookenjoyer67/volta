@@ -807,7 +807,7 @@ impl App {
             }
             RsvpAction::SeekBack10 => {
                 let idx = doc.player().current();
-                doc.player_mut().seek(if idx >= 10 { idx - 10 } else { 0 });
+                doc.player_mut().seek(idx.saturating_sub(10));
             }
             RsvpAction::SeekForward10 => {
                 let idx = doc.player().current();
@@ -816,7 +816,7 @@ impl App {
             }
             RsvpAction::SeekBack100 => {
                 let idx = doc.player().current();
-                doc.player_mut().seek(if idx >= 100 { idx - 100 } else { 0 });
+                doc.player_mut().seek(idx.saturating_sub(100));
             }
             RsvpAction::SeekForward100 => {
                 let idx = doc.player().current();

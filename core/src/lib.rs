@@ -1,3 +1,4 @@
+#![allow(clippy::missing_safety_doc)]
 //! Volta core library — FFI bridge between Rust and Lua.
 //!
 //! ## Architecture
@@ -199,8 +200,20 @@ fn add_to_library(doc: &dyn Document, path: &Path, format: &str) {
     library.save();
 }
 
+// ── FFI exports for LuaJIT bridge ──
+//
+// # Safety
+//
+// All functions below accept raw pointers obtained from `rsvp_open`.
+// The caller must ensure:
+// - The pointer is non-null and was returned by `rsvp_open`.
+// - The pointer has not been freed by `rsvp_close`.
+// - For `rsvp_*_at` functions, index parameters are in bounds.
+// - `rsvp_free_string` is called only on pointers returned by this API.
+// - No concurrent access from multiple threads.
+
 #[no_mangle]
-pub extern "C" fn rsvp_open(path: *const c_char) -> *mut DocEnum {
+pub unsafe extern "C" fn rsvp_open(path: *const c_char) -> *mut DocEnum {
     // Convert C string → Rust &str, return NULL on invalid UTF-8.
     let path_str = unsafe {
         match CStr::from_ptr(path).to_str() {
@@ -262,7 +275,7 @@ pub extern "C" fn rsvp_open(path: *const c_char) -> *mut DocEnum {
 /// After this call the pointer is invalid.  All previously returned
 /// `*const c_char` pointers (word/text/title) are also invalid.
 #[no_mangle]
-pub extern "C" fn rsvp_close(doc: *mut DocEnum) {
+pub unsafe extern "C" fn rsvp_close(doc: *mut DocEnum) {
     if doc.is_null() {
         return;
     }
@@ -274,7 +287,7 @@ pub extern "C" fn rsvp_close(doc: *mut DocEnum) {
 /// Document title.  Caller does NOT own the returned pointer;
 /// it is valid until `rsvp_close`.
 #[no_mangle]
-pub extern "C" fn rsvp_title(doc: *mut DocEnum) -> *const c_char {
+pub unsafe extern "C" fn rsvp_title(doc: *mut DocEnum) -> *const c_char {
     if doc.is_null() {
         return std::ptr::null();
     }
@@ -284,7 +297,7 @@ pub extern "C" fn rsvp_title(doc: *mut DocEnum) -> *const c_char {
 
 /// Total extracted words.
 #[no_mangle]
-pub extern "C" fn rsvp_word_count(doc: *mut DocEnum) -> u32 {
+pub unsafe extern "C" fn rsvp_word_count(doc: *mut DocEnum) -> u32 {
     if doc.is_null() {
         return 0;
     }
@@ -295,7 +308,7 @@ pub extern "C" fn rsvp_word_count(doc: *mut DocEnum) -> u32 {
 /// Word at index `i`.  Returns NULL if `i` is out of bounds.
 /// The returned pointer is valid until `rsvp_close`.
 #[no_mangle]
-pub extern "C" fn rsvp_word_at(
+pub unsafe extern "C" fn rsvp_word_at(
     doc: *mut DocEnum,
     i: u32,
 ) -> *const c_char {
@@ -312,7 +325,7 @@ pub extern "C" fn rsvp_word_at(
 
 /// Chapter index for word `i` (0-based).
 #[no_mangle]
-pub extern "C" fn rsvp_chapter_at(doc: *mut DocEnum, i: u32) -> u32 {
+pub unsafe extern "C" fn rsvp_chapter_at(doc: *mut DocEnum, i: u32) -> u32 {
     if doc.is_null() {
         return 0;
     }
@@ -326,7 +339,7 @@ pub extern "C" fn rsvp_chapter_at(doc: *mut DocEnum, i: u32) -> u32 {
 
 /// Total number of chapters.
 #[no_mangle]
-pub extern "C" fn rsvp_chapter_count(doc: *mut DocEnum) -> u32 {
+pub unsafe extern "C" fn rsvp_chapter_count(doc: *mut DocEnum) -> u32 {
     if doc.is_null() {
         return 0;
     }
@@ -337,7 +350,7 @@ pub extern "C" fn rsvp_chapter_count(doc: *mut DocEnum) -> u32 {
 /// Chapter title for chapter `i` (0-based).  Returns NULL if
 /// `i` is out of bounds.
 #[no_mangle]
-pub extern "C" fn rsvp_chapter_title(
+pub unsafe extern "C" fn rsvp_chapter_title(
     doc: *mut DocEnum,
     i: u32,
 ) -> *const c_char {
@@ -354,7 +367,7 @@ pub extern "C" fn rsvp_chapter_title(
 /// Full plain-text content of chapter `i`.  Returns NULL if
 /// `i` is out of bounds.
 #[no_mangle]
-pub extern "C" fn rsvp_chapter_text(
+pub unsafe extern "C" fn rsvp_chapter_text(
     doc: *mut DocEnum,
     i: u32,
 ) -> *const c_char {
@@ -373,7 +386,7 @@ pub extern "C" fn rsvp_chapter_text(
 /// Result is a C string containing the absolute path to the
 /// cached PNG file, or NULL if rendering failed.
 #[no_mangle]
-pub extern "C" fn rsvp_render_page(
+pub unsafe extern "C" fn rsvp_render_page(
     doc: *mut DocEnum,
     page: u32,
     dpi: u32,
@@ -399,7 +412,7 @@ pub extern "C" fn rsvp_render_page(
 /// Count of inline images in chapter `chapter` (0-based).
 /// Returns 0 for PDF/MD docs.
 #[no_mangle]
-pub extern "C" fn rsvp_chapter_image_count(
+pub unsafe extern "C" fn rsvp_chapter_image_count(
     doc: *mut DocEnum,
     chapter: u32,
 ) -> u32 {
@@ -422,7 +435,7 @@ pub extern "C" fn rsvp_chapter_image_count(
 /// Returns NULL if out of bounds or doc doesn't support images.
 /// The returned pointer is valid until `rsvp_close`.
 #[no_mangle]
-pub extern "C" fn rsvp_chapter_image_at(
+pub unsafe extern "C" fn rsvp_chapter_image_at(
     doc: *mut DocEnum,
     chapter: u32,
     i: u32,
@@ -452,7 +465,7 @@ pub extern "C" fn rsvp_chapter_image_at(
 
 /// Jump to word index `i` (clamped to [0, word_count-1]).
 #[no_mangle]
-pub extern "C" fn rsvp_seek(doc: *mut DocEnum, i: u32) {
+pub unsafe extern "C" fn rsvp_seek(doc: *mut DocEnum, i: u32) {
     if doc.is_null() {
         return;
     }
@@ -462,7 +475,7 @@ pub extern "C" fn rsvp_seek(doc: *mut DocEnum, i: u32) {
 
 /// Set reading speed in words per minute (clamped to 50–2000).
 #[no_mangle]
-pub extern "C" fn rsvp_set_wpm(doc: *mut DocEnum, wpm: u32) {
+pub unsafe extern "C" fn rsvp_set_wpm(doc: *mut DocEnum, wpm: u32) {
     if doc.is_null() {
         return;
     }
@@ -472,7 +485,7 @@ pub extern "C" fn rsvp_set_wpm(doc: *mut DocEnum, wpm: u32) {
 
 /// Start or resume RSVP playback.
 #[no_mangle]
-pub extern "C" fn rsvp_play(doc: *mut DocEnum) {
+pub unsafe extern "C" fn rsvp_play(doc: *mut DocEnum) {
     if doc.is_null() {
         return;
     }
@@ -482,7 +495,7 @@ pub extern "C" fn rsvp_play(doc: *mut DocEnum) {
 
 /// Pause RSVP playback (position preserved).
 #[no_mangle]
-pub extern "C" fn rsvp_pause(doc: *mut DocEnum) {
+pub unsafe extern "C" fn rsvp_pause(doc: *mut DocEnum) {
     if doc.is_null() {
         return;
     }
@@ -492,7 +505,7 @@ pub extern "C" fn rsvp_pause(doc: *mut DocEnum) {
 
 /// Is the player currently advancing?
 #[no_mangle]
-pub extern "C" fn rsvp_is_playing(doc: *mut DocEnum) -> bool {
+pub unsafe extern "C" fn rsvp_is_playing(doc: *mut DocEnum) -> bool {
     if doc.is_null() {
         return false;
     }
@@ -502,7 +515,7 @@ pub extern "C" fn rsvp_is_playing(doc: *mut DocEnum) -> bool {
 
 /// Current word index (0-based).
 #[no_mangle]
-pub extern "C" fn rsvp_current_index(doc: *mut DocEnum) -> u32 {
+pub unsafe extern "C" fn rsvp_current_index(doc: *mut DocEnum) -> u32 {
     if doc.is_null() {
         return 0;
     }
@@ -515,7 +528,7 @@ pub extern "C" fn rsvp_current_index(doc: *mut DocEnum) -> u32 {
 /// Called every frame from `love.update(dt)` when RSVP mode
 /// is active.  Returns the new word index.
 #[no_mangle]
-pub extern "C" fn rsvp_tick(
+pub unsafe extern "C" fn rsvp_tick(
     doc: *mut DocEnum,
     dt_ms: f64,
 ) -> u32 {
@@ -531,7 +544,7 @@ pub extern "C" fn rsvp_tick(
 /// Used when entering RSVP mode from reader mode — seeks the
 /// player to the start of the chapter the user was reading.
 #[no_mangle]
-pub extern "C" fn rsvp_chapter_start(
+pub unsafe extern "C" fn rsvp_chapter_start(
     doc: *const DocEnum,
     chapter: u32,
 ) -> u32 {

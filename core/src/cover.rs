@@ -57,7 +57,7 @@ fn extract_epub_cover(file_path: &str, cache_path: &Path) -> Option<()> {
 fn extract_pdf_cover(file_path: &str, cache_path: &Path) -> Option<()> {
     let prefix = cache_path.with_extension(""); // strip .png
     let output = Command::new("pdftoppm")
-        .args(&[
+        .args([
             "-f", "1",
             "-l", "1",
             "-r", "30",
@@ -157,7 +157,7 @@ pub fn kitty_display_image(
 /// Simple base64 encoder (no external dependency).
 fn base64_encode(data: &[u8]) -> String {
     const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity((data.len() + 2) / 3 * 4);
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
 
     for chunk in data.chunks(3) {
         let b0 = chunk[0] as u32;

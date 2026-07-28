@@ -81,7 +81,7 @@ impl PlayerState {
 
     /// Change reading speed.  Clamped to [50, 2000] WPM.
     pub fn set_wpm(&mut self, wpm: u32) {
-        self.wpm = wpm.max(50).min(2000);
+        self.wpm = wpm.clamp(50, 2000);
     }
 
     /// Resume playback.

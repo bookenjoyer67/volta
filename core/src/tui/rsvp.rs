@@ -68,16 +68,14 @@ impl RsvpState {
         );
 
         // ── Progress bar ──
-        if total > 0 {
-            let bar_width = area.width as usize;
-            let filled = (bar_width * (idx + 1)) / total;
-            let bar = "█".repeat(filled) + &"░".repeat(bar_width.saturating_sub(filled));
-            let bar_line = Line::from(Span::styled(bar, Style::default().fg(theme.progress)));
-            frame.render_widget(
-                Paragraph::new(bar_line),
-                Rect::new(area.x, area.y + area.height - 2, area.width, 1),
-            );
-        }
+        let bar_width = area.width as usize;
+        let filled = total.checked_div(1).map(|_| (bar_width * (idx + 1)) / total).unwrap_or(0);
+        let bar = "█".repeat(filled) + &"░".repeat(bar_width.saturating_sub(filled));
+        let bar_line = Line::from(Span::styled(bar, Style::default().fg(theme.progress)));
+        frame.render_widget(
+            Paragraph::new(bar_line),
+            Rect::new(area.x, area.y + area.height - 2, area.width, 1),
+        );
 
         // ── Stats overlay ──
         if self.show_stats {
