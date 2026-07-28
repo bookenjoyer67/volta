@@ -89,7 +89,7 @@ impl ReaderState {
         };
         self.content_width = max_width;
         self.reflow_key = Some((self.chapter, width, self.margin, self.max_col_width));
-        let (lines, offsets) = wrap_text(&text, max_width as usize);
+        let (lines, offsets) = wrap_text(text, max_width as usize);
         self.wrapped_lines = lines;
         self.line_word_offsets = offsets;
 
@@ -364,11 +364,7 @@ impl ReaderState {
         let current_page = (self.scroll / visible.max(1)) + 1;
         let chapter_pct = {
             let total = self.line_word_offsets.last().copied().unwrap_or(0);
-            if total > 0 {
-                (self.cursor_word * 100) / total
-            } else {
-                100
-            }
+            total.checked_div(1).map(|_| (self.cursor_word * 100) / total).unwrap_or(100)
         };
 
         let has_image = self.image_near_cursor().is_some();

@@ -384,7 +384,7 @@ impl App {
             }
             Mode::Rsvp(ref state) => {
                 if let Some(ref doc) = self.doc {
-                    state.render(frame, area, thm, &doc.player(), doc.doc());
+                    state.render(frame, area, thm, doc.player(), doc.doc());
                 }
             }
             Mode::ImageOverlay(ref state) => {
@@ -689,7 +689,6 @@ impl App {
                             img.cached_path.clone(), img.width, img.height,
                         ));
                         self.needs_draw = true;
-                        return;
                     }
                 }
                 // No image nearby — ignore
