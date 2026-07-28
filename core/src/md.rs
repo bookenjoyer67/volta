@@ -5,7 +5,8 @@
 //! titles. Text between headings is the chapter body.
 
 use crate::doc::Document;
-use crate::types::Word;
+use crate::types::{ChapterImage, Word};
+use sha2::{Digest, Sha256};
 use std::ffi::CString;
 use std::fs;
 use std::path::Path;
@@ -18,6 +19,11 @@ pub struct MdDoc {
     pub chapter_title_cstrings: Vec<CString>,
     pub chapter_texts: Vec<String>,
     pub chapter_text_cstrings: Vec<CString>,
+    /// Per-chapter inline images (C FFI representation).
+    pub chapter_image_c: Vec<Vec<crate::ChapterImageC>>,
+    pub chapter_image_path_cstrings: Vec<Vec<CString>>,
+    /// Per-chapter inline images (Rust representation for TUI use).
+    pub chapter_images: Vec<Vec<crate::types::ChapterImage>>,
 }
 
 impl MdDoc {
@@ -76,15 +82,91 @@ impl MdDoc {
             chapters.push((Self::filename_title(&file_path), raw));
         }
 
-        // Tokenize into words
+        // Tokenize into words, extract images per chapter
         let mut words = Vec::new();
         let mut chapter_texts = Vec::new();
+        let mut all_chapter_images: Vec<Vec<ChapterImage>> = Vec::new();
+        let base_dir = Path::new(&file_path).parent().map(|p| p.to_path_buf());
 
         for (ci, (_title, text)) in chapters.iter().enumerate() {
+            // ── Extract markdown images before tokenizing ──
+            let mut chapter_images: Vec<ChapterImage> = Vec::new();
+            let mut cleaned = String::new();
+            let mut remaining = text.as_str();
+            let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+
+            while let Some(bang_idx) = remaining.find("![") {
+                // Text before the image
+                cleaned.push_str(&remaining[..bang_idx]);
+
+                // Find the closing parenthesis
+                if let Some(open_paren) = remaining[bang_idx..].find('(') {
+                    let paren_start = bang_idx + open_paren;
+                    if let Some(close_paren) = remaining[paren_start..].find(')') {
+                        let path_str = &remaining[paren_start + 1..paren_start + close_paren];
+
+                        // Compute word_offset from cleaned text so far
+                        let word_offset = cleaned.split_whitespace().count();
+
+                        // Try to load the image
+                        if !path_str.is_empty() && !path_str.starts_with("http") {
+                            let img_path = if path_str.starts_with('/') {
+                                Path::new(path_str).to_path_buf()
+                            } else if let Some(ref base) = base_dir {
+                                base.join(path_str)
+                            } else {
+                                Path::new(path_str).to_path_buf()
+                            };
+
+                            // Cache the image
+                            if img_path.exists() {
+                                let mut hasher = Sha256::new();
+                                hasher.update(img_path.to_string_lossy().as_bytes());
+                                let hash = format!("{:x}", hasher.finalize());
+                                let cache_dir = format!("{}/.cache/volta/images", home);
+                                let _ = fs::create_dir_all(&cache_dir);
+                                let cache_path = format!("{}/{}.png", cache_dir, hash);
+
+                                if !Path::new(&cache_path).exists() {
+                                    let _ = fs::copy(&img_path, &cache_path);
+                                }
+
+                                let (w, h) = if Path::new(&cache_path).exists() {
+                                    image::ImageReader::new(
+                                        std::io::Cursor::new(&fs::read(&cache_path).unwrap_or_default()))
+                                        .with_guessed_format().ok()
+                                        .and_then(|r| r.into_dimensions().ok())
+                                        .unwrap_or((0, 0))
+                                } else {
+                                    (0, 0)
+                                };
+
+                                chapter_images.push(ChapterImage {
+                                    word_offset,
+                                    cached_path: cache_path,
+                                    width: w,
+                                    height: h,
+                                });
+                            }
+                        }
+
+                        // Skip past the entire ![...](...) syntax
+                        remaining = &remaining[paren_start + close_paren + 1..];
+                        continue;
+                    }
+                }
+                // Malformed — treat ![ as literal text
+                cleaned.push_str("![");
+                remaining = &remaining[bang_idx + 2..];
+            }
+            // Remaining text after last image
+            cleaned.push_str(remaining);
+
+            all_chapter_images.push(chapter_images);
             // Paragraph-aware normalize: collapse single newlines
             // (CommonMark soft breaks) to spaces within a paragraph,
             // collapse 3+ newlines to one blank line between paragraphs.
-            let trimmed = text
+            let trimmed = cleaned
                 .trim()
                 .split("\n\n")
                 .map(|p| p.split_whitespace().collect::<Vec<_>>().join(" "))
@@ -111,6 +193,26 @@ impl MdDoc {
             .map(|t| CString::new(t.as_str()).unwrap_or_default())
             .collect();
 
+        // --- pre-build C image data for FFI ---
+        let mut chapter_image_c: Vec<Vec<crate::ChapterImageC>> = Vec::new();
+        let mut chapter_image_path_cstrings: Vec<Vec<CString>> = Vec::new();
+        for images in &all_chapter_images {
+            let mut c_images = Vec::new();
+            let mut c_paths = Vec::new();
+            for img in images {
+                c_paths.push(CString::new(img.cached_path.as_str()).unwrap_or_default());
+                let c_ptr = c_paths.last().unwrap().as_ptr();
+                c_images.push(crate::ChapterImageC {
+                    word_offset: img.word_offset as u32,
+                    cached_path: c_ptr,
+                    width: img.width,
+                    height: img.height,
+                });
+            }
+            chapter_image_c.push(c_images);
+            chapter_image_path_cstrings.push(c_paths);
+        }
+
         Ok(MdDoc {
             file_path,
             words,
@@ -119,6 +221,9 @@ impl MdDoc {
             chapter_title_cstrings,
             chapter_text_cstrings,
             chapter_texts,
+            chapter_image_c,
+            chapter_image_path_cstrings,
+            chapter_images: all_chapter_images,
         })
     }
 

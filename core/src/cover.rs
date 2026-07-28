@@ -136,21 +136,45 @@ pub fn kitty_display_image(
     // since we don't want to add a base64 dependency.
     let b64 = base64_encode(&bytes);
 
-    // Move cursor to position, then emit kitty image
-    let cmd = format!(
-        "\x1b[{};{}H\x1b_Ga=T,f=100,s={},v={},c={},r={};{}\x1b\\\\",
-        row + 1,
-        col + 1,
-        img_w,
-        img_h,
-        width_cells,
-        height_cells,
-        b64
-    );
+    // Kitty escape sequences have a size limit (default ~4KB).
+    // Large images must be split into chunks using the m= flag:
+    //   m=1: more chunks follow (don't display yet)
+    //   m=0: last chunk (display now)
+    // Max base64 data per chunk: 3072 bytes → ~4096 byte escape sequence.
+    const CHUNK_DATA: usize = 3072;
 
     let stdout = std::io::stdout();
     let mut handle = stdout.lock();
-    let _ = handle.write_all(cmd.as_bytes());
+
+    // Move cursor to position (once, before first chunk)
+    let cursor_cmd = format!("\x1b[{};{}H", row + 1, col + 1);
+    let _ = handle.write_all(cursor_cmd.as_bytes());
+
+    if b64.len() <= CHUNK_DATA {
+        // Small image — single chunk, no m= flag needed
+        let cmd = format!(
+            "\x1b_Ga=T,f=100,s={},v={},c={},r={};{}\x1b\\",
+            img_w, img_h, width_cells, height_cells, b64
+        );
+        let _ = handle.write_all(cmd.as_bytes());
+    } else {
+        // Large image — split into chunks
+        let chunks: Vec<&str> = b64.as_bytes()
+            .chunks(CHUNK_DATA)
+            .map(|c| std::str::from_utf8(c).unwrap_or(""))
+            .collect();
+        let last = chunks.len() - 1;
+
+        for (i, chunk) in chunks.iter().enumerate() {
+            let m = if i < last { 1 } else { 0 };
+            let cmd = format!(
+                "\x1b_Ga=T,f=100,s={},v={},c={},r={},m={};{}\x1b\\",
+                img_w, img_h, width_cells, height_cells, m, chunk
+            );
+            let _ = handle.write_all(cmd.as_bytes());
+        }
+    }
+
     let _ = handle.flush();
 }
 

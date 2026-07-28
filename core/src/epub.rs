@@ -421,9 +421,8 @@ impl EpubDoc {
             let mut c_images = Vec::new();
             let mut c_paths = Vec::new();
             for img in &ch.images {
-                let c_path = CString::new(img.cached_path.as_str()).unwrap_or_default();
-                let c_ptr = c_path.as_ptr();
-                c_paths.push(c_path);
+                c_paths.push(CString::new(img.cached_path.as_str()).unwrap_or_default());
+                let c_ptr = c_paths.last().unwrap().as_ptr();
                 c_images.push(crate::ChapterImageC {
                     word_offset: img.word_offset as u32,
                     cached_path: c_ptr,

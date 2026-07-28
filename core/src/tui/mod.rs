@@ -1,13 +1,15 @@
 //! TUI frontend — app state machine, event loop, key dispatch.
 
 pub mod action;
+pub mod image_overlay;
 pub mod menu;
 pub mod reader;
 pub mod rsvp;
 pub mod theme;
 pub mod toc;
 
-use action::{Action, MenuAction, ReaderAction, RsvpAction, TocAction};
+use action::{Action, ImageOverlayAction, MenuAction, ReaderAction, RsvpAction, TocAction};
+use image_overlay::ImageOverlayState;
 use menu::{CARD_H, CARD_W, MenuState};
 use reader::ReaderState;
 use rsvp::RsvpState;
@@ -36,6 +38,7 @@ use std::time::{Duration, Instant};
 
 
 pub enum Mode {
+    ImageOverlay(ImageOverlayState),
     Menu(MenuState),
     Reader(ReaderState),
     Rsvp(RsvpState),
@@ -63,6 +66,9 @@ pub struct App {
     pub kitty_covers_shown: bool,
     /// Terminal capabilities detected at startup.
     pub term: Term,
+    /// Return position for image overlay dismiss.
+    pub image_return_chapter: usize,
+    pub image_return_word: usize,
 }
 
 impl App {
@@ -85,6 +91,8 @@ impl App {
             jump_stack: Vec::new(),
             needs_draw: true,
             kitty_covers_shown: false,
+            image_return_chapter: 0,
+            image_return_word: 0,
             term: Term::detect(),
         }
     }
@@ -111,6 +119,8 @@ impl App {
             jump_stack: Vec::new(),
             needs_draw: true,
             kitty_covers_shown: false,
+            image_return_chapter: 0,
+            image_return_word: 0,
             term: Term::detect(),
         }
     }
@@ -183,6 +193,11 @@ impl App {
         self.file_path = Some(path.to_string_lossy().to_string());
         self.doc = Some(doc);
         self.mode = Mode::Reader(reader);
+        if let Mode::Reader(ref mut state) = &mut self.mode {
+            if let Some(ref doc) = self.doc {
+                state.load_images(doc);
+            }
+        }
     }
 
     pub fn tick(&mut self) {
@@ -369,8 +384,11 @@ impl App {
             }
             Mode::Rsvp(ref state) => {
                 if let Some(ref doc) = self.doc {
-                    state.render(frame, area, thm, doc.player(), doc.doc());
+                    state.render(frame, area, thm, &doc.player(), doc.doc());
                 }
+            }
+            Mode::ImageOverlay(ref state) => {
+                state.render(frame, area, thm);
             }
             Mode::Toc(ref mut state) => {
                 state.render(frame, area, thm);
@@ -499,6 +517,7 @@ impl App {
             }
             Mode::Rsvp(state) => Action::Rsvp(RsvpAction::from_key(state, key)),
             Mode::Toc(state) => Action::Toc(TocAction::from_key(state, key)),
+            Mode::ImageOverlay(_) => Action::ImageOverlay(ImageOverlayAction::from_key(key)),
         };
 
         match action {
@@ -506,6 +525,7 @@ impl App {
             Action::Reader(a) => self.handle_reader_action(a),
             Action::Rsvp(a) => self.handle_rsvp_action(a),
             Action::Toc(a) => self.handle_toc_action(a),
+            Action::ImageOverlay(a) => self.handle_image_overlay_action(a),
         }
     }
 
@@ -653,9 +673,26 @@ impl App {
                         let count = doc.doc().chapter_count() as usize;
                         state.chapter = ch.min(count.saturating_sub(1));
                         state.cursor_word = cw;
+                        if let Some(ref doc) = self.doc {
+                            state.load_images(doc);
+                        }
                         state.scroll_to_cursor();
                     }
                 }
+            }
+            ReaderAction::OpenImage { .. } => {
+                if let Mode::Reader(ref state) = &self.mode {
+                    if let Some(img) = state.image_near_cursor() {
+                        self.image_return_chapter = state.chapter;
+                        self.image_return_word = img.word_offset + 1;
+                        self.mode = Mode::ImageOverlay(ImageOverlayState::new(
+                            img.cached_path.clone(), img.width, img.height,
+                        ));
+                        self.needs_draw = true;
+                        return;
+                    }
+                }
+                // No image nearby — ignore
             }
             ReaderAction::EnterRsvp { cursor_word, chapter } => {
                 if let Some(ref mut doc) = self.doc {
@@ -865,6 +902,28 @@ impl App {
 // ── Load saved position from progress.json ──
 
 impl App {
+    fn handle_image_overlay_action(&mut self, action: ImageOverlayAction) {
+        match action {
+            ImageOverlayAction::Dismiss => {
+                // Clear kitty images
+                if self.term.can_images {
+                    volta_core::cover::kitty_clear_all();
+                }
+                // Return to reader
+                if let Some(ref doc) = self.doc {
+                    let mut reader = ReaderState::new(doc.doc());
+                    reader.chapter = self.image_return_chapter;
+                    reader.cursor_word = self.image_return_word;
+                    reader.load_images(doc);
+                    reader.scroll_to_cursor();
+                    self.mode = Mode::Reader(reader);
+                    self.needs_draw = true;
+                }
+            }
+            ImageOverlayAction::None => {}
+        }
+    }
+
     fn handle_toc_action(&mut self, action: TocAction) {
         let doc = match &self.doc {
             Some(d) => d,
@@ -1275,6 +1334,7 @@ pub fn run(mut app: App) -> io::Result<()> {
             if let Some(ref doc) = app.doc {
                 let w = terminal.size()?.width;
                 if state.reflow_if_needed(doc.doc(), w) {
+                    state.load_images(doc);
                     app.needs_draw = true;
                 }
             }
@@ -1287,6 +1347,22 @@ pub fn run(mut app: App) -> io::Result<()> {
 
         // Kitty cover images — emit once per menu view (and on resize),
         // clear once when leaving the menu.
+        // Emit kitty image for image overlay
+        if app.term.can_images {
+            if let Mode::ImageOverlay(ref state) = &app.mode {
+                let size = terminal.size()?;
+                let _term_w = size.width as u32;
+                let _term_h = size.height.saturating_sub(1) as u32;
+                let px_per_cell = 20u32;
+                let cells_w = ((state.img_width / px_per_cell).max(1) as u16).min(size.width);
+                let cells_h = ((state.img_height / px_per_cell).max(1) as u16).min(size.height - 1);
+                let col = (size.width.saturating_sub(cells_w)) / 2;
+                let row = (size.height.saturating_sub(cells_h + 1)) / 2;
+                volta_core::cover::kitty_display_image(
+                    &state.cached_path, row, col, cells_w, cells_h,
+                );
+            }
+        }
         if app.term.can_images {
             if let Mode::Menu(_) = &app.mode {
                 let size = terminal.size()?;

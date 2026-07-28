@@ -19,6 +19,7 @@ pub enum ReaderAction {
     GgTop,
     GBottom,
     EnterRsvp { cursor_word: usize, chapter: usize },
+    OpenImage { cursor_word: usize, chapter: usize },
     EnterToc { chapter: usize, cursor_word: usize },
     JumpBack,
     Save,
@@ -204,6 +205,10 @@ impl ReaderAction {
                 cursor_word: state.cursor_word,
                 chapter: state.chapter,
             },
+            KeyCode::Enter => ReaderAction::OpenImage {
+                cursor_word: state.cursor_word,
+                chapter: state.chapter,
+            },
 
             KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 ReaderAction::Save
@@ -383,4 +388,18 @@ pub enum Action {
     Reader(ReaderAction),
     Rsvp(RsvpAction),
     Toc(TocAction),
+    ImageOverlay(ImageOverlayAction),
+}
+
+// ── Image overlay actions ──
+
+pub enum ImageOverlayAction {
+    None,
+    Dismiss,
+}
+
+impl ImageOverlayAction {
+    pub fn from_key(_key: KeyEvent) -> Self {
+        ImageOverlayAction::Dismiss // any key dismisses
+    }
 }

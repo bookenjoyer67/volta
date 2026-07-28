@@ -16,6 +16,8 @@ use std::collections::HashSet;
 use std::time::Instant;
 use unicode_width::UnicodeWidthStr;
 use volta_core::doc::Document;
+use volta_core::types::ChapterImage;
+use volta_core::DocEnum;
 
 pub struct ReaderState {
     pub chapter: usize,
@@ -38,6 +40,8 @@ pub struct ReaderState {
     pub selection_anchor: Option<usize>,
     /// When true, selection is line-wise (V instead of v).
     pub visual_line_mode: bool,
+    /// Images in the current chapter (sorted by word_offset).
+    pub chapter_images: Vec<ChapterImage>,
 }
 
 impl ReaderState {
@@ -57,6 +61,7 @@ impl ReaderState {
             reflow_key: None,
             selection_anchor: None,
             visual_line_mode: false,
+            chapter_images: Vec::new(),
         };
         state.reflow(doc, 80);
         state
@@ -84,7 +89,7 @@ impl ReaderState {
         };
         self.content_width = max_width;
         self.reflow_key = Some((self.chapter, width, self.margin, self.max_col_width));
-        let (lines, offsets) = wrap_text(text, max_width as usize);
+        let (lines, offsets) = wrap_text(&text, max_width as usize);
         self.wrapped_lines = lines;
         self.line_word_offsets = offsets;
 
@@ -112,6 +117,47 @@ impl ReaderState {
         } else if line >= self.scroll + visible_height {
             self.scroll = line.saturating_sub(visible_height - 2);
         }
+    }
+
+    /// Load images for the current chapter from the document.
+    pub fn load_images(&mut self, doc: &DocEnum) {
+        self.chapter_images.clear();
+        match doc {
+            DocEnum::Epub(epub, _) => {
+                if self.chapter >= epub.chapters.len() {
+                    return;
+                }
+                for img in &epub.chapters[self.chapter].images {
+                    self.chapter_images.push(img.clone());
+                }
+            }
+            DocEnum::Md(md, _) => {
+                if self.chapter >= md.chapter_images.len() {
+                    return;
+                }
+                for img in &md.chapter_images[self.chapter] {
+                    self.chapter_images.push(img.clone());
+                }
+            }
+            _ => {}
+        }
+        // Sort by word_offset so find() returns the nearest image first
+        self.chapter_images.sort_by_key(|img| img.word_offset);
+    }
+
+    /// Find the nearest image within range of the cursor.
+    /// Searches up to 15 words ahead and 5 words behind, returning
+    /// the first image in sorted order that falls within range.
+    pub fn image_near_cursor(&self) -> Option<&ChapterImage> {
+        self.chapter_images
+            .iter()
+            .find(|img| {
+                let ahead = img.word_offset >= self.cursor_word
+                    && img.word_offset <= self.cursor_word + 15;
+                let behind = img.word_offset < self.cursor_word
+                    && img.word_offset + 5 >= self.cursor_word;
+                ahead || behind
+            })
     }
 
     /// Draw the reader view.
@@ -166,7 +212,35 @@ impl ReaderState {
         let start = self.scroll;
         let end = (start + visible_height).min(self.wrapped_lines.len());
 
+        // Build a set of image word_offsets for quick lookup
+        let image_offsets: HashSet<usize> = self
+            .chapter_images
+            .iter()
+            .map(|img| img.word_offset)
+            .collect();
+
         for i in start..end {
+            // ── Insert image marker line before text when an image lands here ──
+            let line_first = self.line_word_offsets[i];
+            let line_last = if i + 1 < self.line_word_offsets.len() {
+                self.line_word_offsets[i + 1].saturating_sub(1)
+            } else {
+                *self.line_word_offsets.last().unwrap_or(&0)
+                    + self.wrapped_lines[i]
+                        .split_whitespace()
+                        .count()
+                        .saturating_sub(1)
+            };
+            let has_image = image_offsets
+                .iter()
+                .any(|&off| off >= line_first && off <= line_last);
+            if has_image && !lines.is_empty() {
+                lines.push(Line::from(Span::styled(
+                    "── 📷 ──",
+                    Style::default().fg(theme.heading),
+                )));
+            }
+
             let line_text = &self.wrapped_lines[i];
 
             // Build spans for this line, highlighting cursor + matches
@@ -218,10 +292,7 @@ impl ReaderState {
                     Style::default().fg(theme.text)
                 };
 
-                spans.push(Span::styled(
-                    &line_text[word_start..word_end],
-                    style,
-                ));
+                spans.push(Span::styled(&line_text[word_start..word_end], style));
 
                 byte_pos = word_end;
                 // Add trailing space if not last word
@@ -293,10 +364,23 @@ impl ReaderState {
         let current_page = (self.scroll / visible.max(1)) + 1;
         let chapter_pct = {
             let total = self.line_word_offsets.last().copied().unwrap_or(0);
-            total.checked_div(1).map(|_| (self.cursor_word * 100) / total).unwrap_or(100)
+            if total > 0 {
+                (self.cursor_word * 100) / total
+            } else {
+                100
+            }
         };
 
-        let status = if !search_matches.is_empty() {
+        let has_image = self.image_near_cursor().is_some();
+        let status = if has_image {
+            format!(
+                "{}  |  {}/{}  |  {}%  |  [IMAGE — Enter to view]",
+                doc.title(),
+                current_page,
+                pages,
+                chapter_pct
+            )
+        } else if !search_matches.is_empty() {
             format!(
                 "Match {}/{}  |  Page {}/{}  |  {}%  |  {}  |  n/N next/prev  Esc clear",
                 search_idx + 1,

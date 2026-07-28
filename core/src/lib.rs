@@ -427,6 +427,12 @@ pub unsafe extern "C" fn rsvp_chapter_image_count(
             }
             epub_doc.chapters[chapter as usize].images.len() as u32
         }
+        DocEnum::Md(md_doc, _) => {
+            if chapter >= md_doc.chapter_image_c.len() as u32 {
+                return 0;
+            }
+            md_doc.chapter_image_c[chapter as usize].len() as u32
+        }
         _ => 0,
     }
 }
@@ -450,6 +456,16 @@ pub unsafe extern "C" fn rsvp_chapter_image_at(
                 return std::ptr::null();
             }
             let ch_images = &epub_doc.chapter_image_c[chapter as usize];
+            if i >= ch_images.len() as u32 {
+                return std::ptr::null();
+            }
+            &ch_images[i as usize] as *const ChapterImageC
+        }
+        DocEnum::Md(md_doc, _) => {
+            if chapter >= md_doc.chapter_image_c.len() as u32 {
+                return std::ptr::null();
+            }
+            let ch_images = &md_doc.chapter_image_c[chapter as usize];
             if i >= ch_images.len() as u32 {
                 return std::ptr::null();
             }

@@ -218,6 +218,7 @@ function M:_load_images()
 
   if not book:is_loaded() then return end
   local count = book:chapter_image_count(M.current_chapter)
+  print(string.format("[volta] _load_images: chapter=%d count=%d", M.current_chapter, count))
   if count == 0 then return end
 
   local avail = love.graphics.getWidth() - M.margin * 2
@@ -227,17 +228,17 @@ function M:_load_images()
   for i = 0, count - 1 do
     local info = book:chapter_image_at(M.current_chapter, i)
     if info and info.path then
-      -- Check if file exists
+      print(string.format("[volta]   image %d: path=%s wo=%d w=%d h=%d", i, info.path, info.word_offset, info.width, info.height))
       local f = io.open(info.path, "r")
       if f then
         f:close()
         local ok, img = pcall(love.graphics.newImage, info.path)
         if ok and img then
           local iw, ih = img:getWidth(), img:getHeight()
-          -- Scale to fit within text width, max 400px height
           local scale = math.min(max_width / math.max(1, iw), 400 / math.max(1, ih), 1.0)
           local dw = iw * scale
           local dh = ih * scale
+          print(string.format("[volta]   -> loaded %dx%d, scaled to %dx%d", iw, ih, dw, dh))
           table.insert(M._images, {
             word_offset = info.word_offset,
             img = img,
@@ -246,8 +247,14 @@ function M:_load_images()
             orig_w = iw,
             orig_h = ih,
           })
+        else
+          print(string.format("[volta]   -> FAILED to load image: %s", ok and "pcall ok but nil img" or tostring(img)))
         end
+      else
+        print(string.format("[volta]   -> file not found: %s", info.path))
       end
+    else
+      print(string.format("[volta]   image %d: nil info or nil path", i))
     end
   end
 
