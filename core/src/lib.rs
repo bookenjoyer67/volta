@@ -28,6 +28,7 @@ pub mod library;
 pub mod md;
 pub mod pdf;
 pub mod player;
+pub mod term;
 pub mod types;
 
 use doc::Document;

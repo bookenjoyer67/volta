@@ -19,6 +19,7 @@ use volta_core::library::{Library, LibraryEntry};
 use volta_core::md::MdDoc;
 use volta_core::pdf::PdfDoc;
 use volta_core::player::PlayerState;
+use volta_core::term::Term;
 use volta_core::DocEnum;
 
 use crossterm::event::{self, Event, KeyCode, KeyEvent};
@@ -60,6 +61,8 @@ pub struct App {
     pub needs_draw: bool,
     /// Kitty covers: true = emitted for the current menu view.
     pub kitty_covers_shown: bool,
+    /// Terminal capabilities detected at startup.
+    pub term: Term,
 }
 
 impl App {
@@ -82,6 +85,7 @@ impl App {
             jump_stack: Vec::new(),
             needs_draw: true,
             kitty_covers_shown: false,
+            term: Term::detect(),
         }
     }
 
@@ -107,6 +111,7 @@ impl App {
             jump_stack: Vec::new(),
             needs_draw: true,
             kitty_covers_shown: false,
+            term: Term::detect(),
         }
     }
 
@@ -661,7 +666,7 @@ impl App {
                     doc.player_mut().seek(idx as u32);
                     doc.player_mut().play();
                     self.last_tick = Instant::now();
-                    zoom_terminal(true);
+                    zoom_terminal(self, true);
                     self.mode = Mode::Rsvp(RsvpState::new());
                 }
             }
@@ -850,7 +855,7 @@ impl App {
                 reader.chapter = ch;
                 reader.cursor_word = cursor;
                 reader.scroll_to_cursor();
-                zoom_terminal(false);
+                zoom_terminal(self, false);
                 self.mode = Mode::Reader(reader);
             }
         }
@@ -1096,7 +1101,11 @@ fn kitty_config_font_size() -> f32 {
     fallback
 }
 
-fn zoom_terminal(zoom_in: bool) {
+fn zoom_terminal(app: &App, zoom_in: bool) {
+    if !app.term.can_font_zoom {
+        return;
+    }
+
     let original = kitty_config_font_size();
     let target = if zoom_in {
         format!("{:.1}", original + 20.0)
@@ -1104,15 +1113,9 @@ fn zoom_terminal(zoom_in: bool) {
         format!("{:.1}", original)
     };
 
-    let status = std::process::Command::new("kitty")
+    drop(std::process::Command::new("kitty")
         .args(["@", "set-font-size", &target])
-        .status();
-
-    if let Err(e) = status {
-        eprintln!("Failed to set font size to {target}: {e}");
-    } else {
-        eprintln!("Font size set to {target}");
-    }
+        .status());
 }
 /// Build a plain-text string from a word range spanning wrapped lines.
 /// word range is inclusive: [start_word, end_word].
@@ -1236,7 +1239,7 @@ pub fn run(mut app: App) -> io::Result<()> {
 
         // Kitty cover images — emit once per menu view (and on resize),
         // clear once when leaving the menu.
-        if volta_core::cover::is_kitty() {
+        if app.term.can_images {
             if let Mode::Menu(_) = &app.mode {
                 let size = terminal.size()?;
                 let wh = (size.width, size.height);
