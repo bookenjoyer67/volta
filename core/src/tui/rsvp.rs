@@ -128,3 +128,42 @@ fn render_orp_word<'a>(word: &'a str, pivot_frac: f32, theme: &Theme) -> Vec<Spa
         Span::styled(right, Style::default().fg(theme.orp_fade)),
     ]
 }
+
+#[cfg(test)]
+mod tests {
+    use super::render_orp_word;
+    use crate::tui::theme::NEON;
+
+    #[test]
+    fn splits_at_40_percent() {
+        // "reading" = 7 chars, pivot at floor(7 * 0.4) = 2 → 'a'
+        let spans = render_orp_word("reading", 0.4, &NEON);
+        assert_eq!(spans.len(), 3);
+        // left, pivot, right
+        assert!(spans[0].content.contains("re"));
+        assert!(spans[1].content.contains('a'));
+        assert!(spans[2].content.contains("ding"));
+    }
+
+    #[test]
+    fn single_char_word_pivot_is_the_char() {
+        let spans = render_orp_word("a", 0.4, &NEON);
+        assert_eq!(spans.len(), 3);
+        assert!(spans[1].content.contains('a'));
+    }
+
+    #[test]
+    fn empty_word_returns_single_span() {
+        let spans = render_orp_word("", 0.4, &NEON);
+        assert_eq!(spans.len(), 1);
+    }
+
+    #[test]
+    fn short_word_pivot_at_first_char() {
+        // "ab" → floor(2 * 0.4) = 0 → pivot at 'a'
+        let spans = render_orp_word("ab", 0.4, &NEON);
+        assert_eq!(spans.len(), 3);
+        // pivot should be 'a'
+        assert!(spans[1].content.contains('a'));
+    }
+}

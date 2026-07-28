@@ -1168,6 +1168,7 @@ fn build_selection_text(
 #[cfg(test)]
 mod tests {
     use super::word_byte_starts;
+    use super::build_selection_text;
 
     /// The original O(n) per-match algorithm, kept as a test oracle.
     fn oracle_offset(text: &str, abs_pos: usize) -> usize {
@@ -1195,6 +1196,53 @@ mod tests {
             let fast = starts.partition_point(|&s| s < abs);
             assert_eq!(fast, oracle_offset(text, abs), "mismatch at byte {}", abs);
         }
+    }
+
+    #[test]
+    fn selects_single_line_range() {
+        let lines = vec!["    alpha beta gamma".to_string()];
+        let offsets = vec![0];
+        let result = build_selection_text(&lines, &offsets, 0, 1);
+        assert_eq!(result, "alpha beta");
+    }
+
+    #[test]
+    fn selects_across_lines() {
+        let lines = vec![
+            "    alpha beta gamma".to_string(),
+            "delta epsilon".to_string(),
+        ];
+        let offsets = vec![0, 3];
+        let result = build_selection_text(&lines, &offsets, 0, 4);
+        assert_eq!(result, "alpha beta gamma delta epsilon");
+    }
+
+    #[test]
+    fn skips_lines_not_in_range() {
+        let lines = vec![
+            "    one two".to_string(),
+            "three four".to_string(),
+            "five six".to_string(),
+        ];
+        let offsets = vec![0, 2, 4];
+        let result = build_selection_text(&lines, &offsets, 0, 1);
+        assert_eq!(result, "one two");
+    }
+
+    #[test]
+    fn strips_paragraph_indent() {
+        let lines = vec!["    hello world".to_string()];
+        let offsets = vec![0];
+        let result = build_selection_text(&lines, &offsets, 0, 1);
+        assert!(!result.contains("    "), "indent not stripped: {:?}", result);
+    }
+
+    #[test]
+    fn empty_range_returns_empty() {
+        let lines = vec!["    a b c".to_string()];
+        let offsets = vec![0];
+        let result = build_selection_text(&lines, &offsets, 5, 4);
+        assert_eq!(result, "");
     }
 }
 

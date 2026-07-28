@@ -104,3 +104,117 @@ impl PlayerState {
         self.is_playing
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::PlayerState;
+
+    #[test]
+    fn new_player_starts_paused_at_zero() {
+        let p = PlayerState::new(100, 300);
+        assert_eq!(p.current(), 0);
+        assert!(!p.is_playing());
+    }
+
+    #[test]
+    fn tick_does_nothing_when_paused() {
+        let mut p = PlayerState::new(100, 300);
+        let idx = p.tick(1000.0);
+        assert_eq!(idx, 0);
+    }
+
+    #[test]
+    fn tick_advances_at_300_wpm() {
+        // 300 WPM = 200ms per word
+        let mut p = PlayerState::new(100, 300);
+        p.play();
+        let idx = p.tick(200.0);
+        assert_eq!(idx, 1);
+    }
+
+    #[test]
+    fn tick_accumulates_partial_time() {
+        // 300 WPM = 200ms per word
+        let mut p = PlayerState::new(100, 300);
+        p.play();
+        assert_eq!(p.tick(100.0), 0); // not enough yet
+        assert_eq!(p.tick(100.0), 1); // crosses threshold
+    }
+
+    #[test]
+    fn tick_does_not_advance_past_end() {
+        let mut p = PlayerState::new(3, 600); // 3 words, 100ms each
+        p.play();
+        p.tick(1000.0);
+        assert_eq!(p.current(), 2); // last word, not past end
+    }
+
+    #[test]
+    fn seek_jumps_to_position() {
+        let mut p = PlayerState::new(100, 300);
+        p.seek(42);
+        assert_eq!(p.current(), 42);
+    }
+
+    #[test]
+    fn seek_clamps_to_max() {
+        let mut p = PlayerState::new(10, 300);
+        p.seek(999);
+        assert_eq!(p.current(), 9);
+    }
+
+    #[test]
+    fn seek_resets_accumulator() {
+        let mut p = PlayerState::new(100, 300);
+        p.play();
+        p.tick(100.0); // accumulate half a word
+        p.seek(50);
+        // fresh accumulator — half-word from before shouldn't count
+        assert_eq!(p.tick(100.0), 50);
+    }
+
+    #[test]
+    fn play_and_pause_toggle() {
+        let mut p = PlayerState::new(100, 300);
+        assert!(!p.is_playing());
+        p.play();
+        assert!(p.is_playing());
+        p.pause();
+        assert!(!p.is_playing());
+    }
+
+    #[test]
+    fn wpm_clamped_to_range() {
+        let mut p = PlayerState::new(100, 300);
+        p.set_wpm(10);
+        assert_eq!(p.wpm, 50);
+        p.set_wpm(9999);
+        assert_eq!(p.wpm, 2000);
+        p.set_wpm(500);
+        assert_eq!(p.wpm, 500);
+    }
+
+    #[test]
+    fn empty_document_never_advances() {
+        let mut p = PlayerState::new(0, 300);
+        p.play();
+        assert_eq!(p.tick(10000.0), 0);
+    }
+
+    #[test]
+    fn fast_wpm_with_large_dt_does_not_overshoot() {
+        // 2000 WPM = 30ms per word, 5 seconds of dt
+        let mut p = PlayerState::new(50, 2000);
+        p.play();
+        let idx = p.tick(5000.0);
+        assert_eq!(idx, 49);
+    }
+
+    #[test]
+    fn tick_returns_u32() {
+        let mut p = PlayerState::new(100, 300);
+        p.play();
+        let idx: u32 = p.tick(200.0);
+        assert_eq!(idx, 1u32);
+    }
+}

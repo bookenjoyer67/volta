@@ -79,3 +79,52 @@ impl Term {
         TermKind::Generic
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Term;
+
+    #[test]
+    fn detects_kitty_via_window_id() {
+        unsafe { std::env::set_var("KITTY_WINDOW_ID", "1") };
+        let term = Term::detect();
+        assert!(term.can_font_zoom);
+        assert!(term.can_images);
+        unsafe { std::env::remove_var("KITTY_WINDOW_ID") };
+    }
+
+    #[test]
+    fn detects_kitty_via_term() {
+        unsafe { std::env::set_var("TERM", "xterm-kitty") };
+        let term = Term::detect();
+        assert!(term.can_font_zoom);
+        unsafe { std::env::remove_var("TERM") };
+    }
+
+    #[test]
+    fn generic_terminal_has_no_capabilities() {
+        unsafe {
+            std::env::remove_var("KITTY_WINDOW_ID");
+            std::env::set_var("TERM", "xterm-256color");
+        }
+        let term = Term::detect();
+        assert!(!term.can_font_zoom);
+        assert!(!term.can_images);
+        unsafe { std::env::remove_var("TERM") };
+    }
+
+    #[test]
+    fn unknown_terminal_is_generic() {
+        unsafe {
+            std::env::remove_var("KITTY_WINDOW_ID");
+            std::env::remove_var("TERM");
+            std::env::remove_var("TERM_PROGRAM");
+            std::env::remove_var("GNOME_TERMINAL_SERVICE");
+            std::env::remove_var("VTE_VERSION");
+            std::env::remove_var("XTERM_VERSION");
+        }
+        let term = Term::detect();
+        assert!(!term.can_font_zoom);
+        assert!(!term.can_images);
+    }
+}
