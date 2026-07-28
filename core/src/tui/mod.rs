@@ -683,6 +683,10 @@ impl App {
             ReaderAction::OpenImage { .. } => {
                 if let Mode::Reader(ref state) = &self.mode {
                     if let Some(img) = state.image_near_cursor() {
+                        // For PDFs: render the page on-demand if not yet cached
+                        if let Some(DocEnum::Pdf(pdf, _)) = &self.doc {
+                            let _ = pdf.render_page((state.chapter + 1) as u32, 150);
+                        }
                         self.image_return_chapter = state.chapter;
                         self.image_return_word = img.word_offset + 1;
                         self.mode = Mode::ImageOverlay(ImageOverlayState::new(

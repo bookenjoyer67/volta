@@ -433,7 +433,10 @@ pub unsafe extern "C" fn rsvp_chapter_image_count(
             }
             md_doc.chapter_image_c[chapter as usize].len() as u32
         }
-        _ => 0,
+        DocEnum::Pdf(..) => {
+            // PDF image FFI not yet wired; TUI code path uses chapter_images directly
+            0
+        }
     }
 }
 
@@ -471,7 +474,10 @@ pub unsafe extern "C" fn rsvp_chapter_image_at(
             }
             &ch_images[i as usize] as *const ChapterImageC
         }
-        _ => std::ptr::null(),
+        DocEnum::Pdf(..) => {
+            // PDF image FFI not yet wired; TUI code path uses chapter_images directly
+            std::ptr::null()
+        }
     }
 }
 

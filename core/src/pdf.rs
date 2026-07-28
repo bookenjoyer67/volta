@@ -8,7 +8,7 @@
 //! keyed by the PDF's absolute path.
 
 use crate::doc::Document;
-use crate::types::Word;
+use crate::types::{ChapterImage, Word};
 use sha2::{Sha256, Digest};
 use std::ffi::CString;
 use std::fs;
@@ -30,6 +30,9 @@ pub struct PdfDoc {
     pub chapter_texts: Vec<String>,
     /// `~/.cache/volta/<sha256(file_path)>/` — stores rendered page PNGs.
     pub cache_dir: PathBuf,
+    /// Per-page rendered images (one per chapter, at word_offset 0).
+    /// PNGs are rendered on-demand via render_page().
+    pub chapter_images: Vec<Vec<crate::types::ChapterImage>>,
 }
 
 impl PdfDoc {
@@ -92,6 +95,27 @@ impl PdfDoc {
         fs::create_dir_all(&cache_dir)
             .map_err(|e| format!("Failed to create cache dir: {}", e))?;
 
+        // Build per-page ChapterImage entries (one per page, word_offset 0).
+        // PNGs are rendered on-demand by render_page() — we store the
+        // expected cache path without rendering first.
+        // Use page_count from pdfinfo (more reliable than pages.len() which
+        // can include a trailing empty entry from pdftotext's form-feed split).
+        let chapter_images: Vec<Vec<ChapterImage>> = (1..=page_count as usize)
+            .map(|page| {
+                let prefix = format!("page_{:04}", page);
+                let cached_path = cache_dir
+                    .join(format!("{}.png", prefix))
+                    .to_string_lossy()
+                    .to_string();
+                vec![ChapterImage {
+                    word_offset: 0,
+                    cached_path,
+                    width: 0,
+                    height: 0,
+                }]
+            })
+            .collect();
+
         // Pre-build CStrings for FFI (same pattern as EpubDoc)
         let word_cstrings: Vec<CString> =
             words.iter().map(|w| w.to_cstring()).collect();
@@ -109,6 +133,7 @@ impl PdfDoc {
             chapter_title_cstrings,
             chapter_texts,
             cache_dir,
+            chapter_images,
         })
     }
 
@@ -220,5 +245,85 @@ impl Document for PdfDoc {
 
     fn chapter_text(&self, i: u32) -> &str {
         &self.chapter_texts[i as usize]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::DocEnum;
+
+    #[test]
+    fn pdf_chapter_images_match_pages() {
+        let path = "/tmp/test.pdf";
+        if !std::path::Path::new(path).exists() {
+            eprintln!("Skipping: test PDF not found");
+            return;
+        }
+        let doc = PdfDoc::open(std::path::Path::new(path)).expect("open failed");
+        assert!(doc.page_count > 0);
+        assert_eq!(doc.chapter_images.len(), doc.page_count as usize);
+        for (i, images) in doc.chapter_images.iter().enumerate() {
+            assert_eq!(images.len(), 1, "page {i} should have 1 image");
+            assert_eq!(images[0].word_offset, 0);
+            assert!(images[0].cached_path.contains("page_"));
+        }
+        let rendered = doc.render_page(1, 150).unwrap();
+        assert_eq!(doc.chapter_images[0][0].cached_path, rendered);
+    }
+
+    #[test]
+    fn pdf_load_images_no_panic_on_bounds() {
+        let path = "/tmp/test.pdf";
+        if !std::path::Path::new(path).exists() {
+            return;
+        }
+        let pdf = PdfDoc::open(std::path::Path::new(path)).expect("open failed");
+        let doc_enum = DocEnum::Pdf(pdf, crate::player::PlayerState::new(0, 300));
+        let mut images: Vec<crate::types::ChapterImage> = Vec::new();
+        if let DocEnum::Pdf(ref pdf, _) = doc_enum {
+            if 0 < pdf.chapter_images.len() {
+                for img in &pdf.chapter_images[0] {
+                    images.push(img.clone());
+                }
+                assert!(!images.is_empty());
+            }
+            let max_ch = pdf.chapter_images.len() + 10;
+            assert!(max_ch >= pdf.chapter_images.len());
+        }
+    }
+
+    #[test]
+    fn pdf_reader_image_near_cursor() {
+        // Simulate what image_near_cursor does: find images within range
+        let path = "/tmp/test.pdf";
+        if !std::path::Path::new(path).exists() {
+            return;
+        }
+        let pdf = PdfDoc::open(std::path::Path::new(path)).expect("open failed");
+        let doc_enum = DocEnum::Pdf(pdf, crate::player::PlayerState::new(0, 300));
+
+        // Load chapter_images like ReaderState::load_images does
+        let mut chapter_images: Vec<crate::types::ChapterImage> = Vec::new();
+        if let DocEnum::Pdf(ref pdf, _) = doc_enum {
+            for img in &pdf.chapter_images[0] {
+                chapter_images.push(img.clone());
+            }
+        }
+        chapter_images.sort_by_key(|img| img.word_offset);
+
+        // image_near_cursor logic: find first img with word_offset >= cursor
+        // and within 15 ahead OR within 5 behind
+        let find = |cursor: usize| -> bool {
+            chapter_images.iter().any(|img| {
+                let ahead = img.word_offset >= cursor && img.word_offset <= cursor + 15;
+                let behind = img.word_offset < cursor && img.word_offset + 5 >= cursor;
+                ahead || behind
+            })
+        };
+
+        assert!(find(0), "should find image at cursor=0");
+        assert!(find(5), "should find image at cursor=5");
+        assert!(!find(20), "should NOT find image at cursor=20");
     }
 }

@@ -139,7 +139,14 @@ impl ReaderState {
                     self.chapter_images.push(img.clone());
                 }
             }
-            _ => {}
+            DocEnum::Pdf(pdf, _) => {
+                if self.chapter >= pdf.chapter_images.len() {
+                    return;
+                }
+                for img in &pdf.chapter_images[self.chapter] {
+                    self.chapter_images.push(img.clone());
+                }
+            }
         }
         // Sort by word_offset so find() returns the nearest image first
         self.chapter_images.sort_by_key(|img| img.word_offset);
@@ -234,7 +241,7 @@ impl ReaderState {
             let has_image = image_offsets
                 .iter()
                 .any(|&off| off >= line_first && off <= line_last);
-            if has_image && !lines.is_empty() {
+            if has_image {
                 lines.push(Line::from(Span::styled(
                     "── 📷 ──",
                     Style::default().fg(theme.heading),
@@ -364,7 +371,11 @@ impl ReaderState {
         let current_page = (self.scroll / visible.max(1)) + 1;
         let chapter_pct = {
             let total = self.line_word_offsets.last().copied().unwrap_or(0);
-            total.checked_div(1).map(|_| (self.cursor_word * 100) / total).unwrap_or(100)
+        
+            self.cursor_word
+                .checked_mul(100)
+                .and_then(|n| n.checked_div(total))
+                .unwrap_or(0)   
         };
 
         let has_image = self.image_near_cursor().is_some();
