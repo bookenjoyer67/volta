@@ -81,7 +81,10 @@ fn extract_pdf_cover(file_path: &str, cache_path: &Path) -> Option<()> {
 pub fn is_kitty() -> bool {
     std::env::var("KITTY_WINDOW_ID").is_ok()
         || std::env::var("TERM")
-            .map(|t| t.contains("kitty"))
+            .map(|t| t.contains("kitty") || t.contains("ghostty"))
+            .unwrap_or(false)
+        || std::env::var("TERM_PROGRAM")
+            .map(|p| p == "ghostty")
             .unwrap_or(false)
 }
 
@@ -153,8 +156,8 @@ pub fn kitty_display_image(
     if b64.len() <= CHUNK_DATA {
         // Small image — single chunk, no m= flag needed
         let cmd = format!(
-            "\x1b_Ga=T,f=100,s={},v={},c={},r={};{}\x1b\\",
-            img_w, img_h, width_cells, height_cells, b64
+            "\x1b_Ga=T,f=32,s={},v=1,c={},r={};{}\x1b\\",
+            img_w, img_h, width_cells, height_cells
         );
         let _ = handle.write_all(cmd.as_bytes());
     } else {

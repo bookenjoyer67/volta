@@ -33,10 +33,11 @@ impl Term {
         let kind = Self::detect_kind();
         Term {
             can_font_zoom: matches!(kind, TermKind::Kitty),
-            can_images: matches!(kind, TermKind::Kitty),
+            can_images: matches!(kind, TermKind::Kitty | TermKind::Ghostty),
             kind,
         }
     }
+    
 
     fn detect_kind() -> TermKind {
         // Kitty: sets KITTY_WINDOW_ID on every window
@@ -55,14 +56,14 @@ impl Term {
             if term.contains("foot") {
                 return TermKind::Foot;
             }
-            if term.contains("ghostty") {
-                return TermKind::Ghostty;
-            }
         }
         // WezTerm sets TERM_PROGRAM
         if let Ok(prog) = std::env::var("TERM_PROGRAM") {
-            if prog.contains("WezTerm") {
+            if prog == ("WezTerm") {
                 return TermKind::WezTerm;
+            }
+            if prog == ("ghostty") {
+                return TermKind::Ghostty;
             }
         }
         // GNOME Terminal / VTE-based terminals
@@ -95,9 +96,25 @@ mod tests {
 
     #[test]
     fn detects_kitty_via_term() {
-        unsafe { std::env::set_var("TERM", "xterm-kitty") };
+        unsafe {
+            std::env::remove_var("KITTY_WINDOW_ID");
+            std::env::remove_var("TERM_PROGRAM");
+            std::env::remove_var("GNOME_TERMINAL_SERVICE");
+            std::env::remove_var("VTE_VERSION");
+            std::env::remove_var("XTERM_VERSION");
+            std::env::set_var("TERM", "xterm-kitty") 
+        }
         let term = Term::detect();
         assert!(term.can_font_zoom);
+        unsafe { std::env::remove_var("TERM") };
+    }
+
+    #[test]
+    fn detects_ghostty_via_term() {
+        unsafe { std::env::set_var("TERM", "ghostty") };
+        let term = Term::detect();
+        assert!(term.can_images);
+        assert!(!term.can_font_zoom); // as expected
         unsafe { std::env::remove_var("TERM") };
     }
 
