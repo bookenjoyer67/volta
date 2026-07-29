@@ -10,7 +10,7 @@ pub mod toc;
 
 use action::{Action, ImageOverlayAction, MenuAction, ReaderAction, RsvpAction, TocAction};
 use image_overlay::ImageOverlayState;
-use menu::{CARD_H, CARD_W, MenuState};
+use menu::{MenuState, CARD_H, CARD_W};
 use reader::ReaderState;
 use rsvp::RsvpState;
 use toc::TocState;
@@ -36,7 +36,6 @@ use std::io;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-
 pub enum Mode {
     ImageOverlay(ImageOverlayState),
     Menu(MenuState),
@@ -51,14 +50,14 @@ pub struct App {
     pub file_path: Option<String>, // for progress save key
     pub should_quit: bool,
     pub last_tick: Instant,
-    pub flash: (f64, String),    // (seconds, message) for status-bar flash
-    pub theme_index: usize, // index into theme::THEMES
+    pub flash: (f64, String), // (seconds, message) for status-bar flash
+    pub theme_index: usize,   // index into theme::THEMES
     pub library: Library,
     // Search state
     pub search_query: String,
     pub search_matches: Vec<(usize, usize)>, // (chapter_idx, word_offset)
     pub search_idx: usize,
-    pub search_input: bool, // true = typing search query
+    pub search_input: bool,              // true = typing search query
     pub jump_stack: Vec<(usize, usize)>, // (chapter, cursor_word) for Ctrl+o back
     /// Redraw only when something changed (events, RSVP ticks, save flash).
     pub needs_draw: bool,
@@ -178,7 +177,9 @@ impl App {
 
         // Capture saved position before add_to_library resets it
         let path_str = path.to_string_lossy().to_string();
-        let saved = self.library.get(&path_str)
+        let saved = self
+            .library
+            .get(&path_str)
             .map(|e| (e.current_chapter as usize, e.current_word));
 
         add_to_library(&mut self.library, &path_str, doc.doc());
@@ -243,7 +244,6 @@ impl App {
             self.flash = (1.5, "Saved".into());
         }
     }
-
 
     /// Cycle theme: dir=1 for next, dir=-1 for previous.
     fn cycle_theme(&mut self, dir: i32) {
@@ -346,19 +346,26 @@ impl App {
         // Menu entries are only needed in Menu mode — avoid cloning the
         // whole library on every reader/RSVP/TOC frame.
         let menu_entries: Vec<(String, LibraryEntry)> = if matches!(self.mode, Mode::Menu(_)) {
-            self.library.entries().iter().map(|(p, e)| {
-                (p.to_string(), LibraryEntry {
-                    title: e.title.clone(),
-                    author: e.author.clone(),
-                    format: e.format.clone(),
-                    chapter_count: e.chapter_count,
-                    current_chapter: e.current_chapter,
-                    current_word: e.current_word,
-                    last_opened: e.last_opened,
-                    added: e.added,
-                    cover_path: e.cover_path.clone(),
+            self.library
+                .entries()
+                .iter()
+                .map(|(p, e)| {
+                    (
+                        p.to_string(),
+                        LibraryEntry {
+                            title: e.title.clone(),
+                            author: e.author.clone(),
+                            format: e.format.clone(),
+                            chapter_count: e.chapter_count,
+                            current_chapter: e.current_chapter,
+                            current_word: e.current_word,
+                            last_opened: e.last_opened,
+                            added: e.added,
+                            cover_path: e.cover_path.clone(),
+                        },
+                    )
                 })
-            }).collect()
+                .collect()
         } else {
             Vec::new()
         };
@@ -375,14 +382,7 @@ impl App {
             }
             Mode::Reader(ref mut state) => {
                 if let Some(ref doc) = self.doc {
-                    state.render(
-                        frame,
-                        area,
-                        thm,
-                        doc.doc(),
-                        &search_matches,
-                        search_idx,
-                    );
+                    state.render(frame, area, thm, doc.doc(), &search_matches, search_idx);
                 }
             }
             Mode::Rsvp(ref state) => {
@@ -537,7 +537,7 @@ impl App {
     fn handle_menu_action(&mut self, action: MenuAction) {
         match action {
             MenuAction::None => {}
-            
+
             MenuAction::Open => {
                 let path = match &self.mode {
                     Mode::Menu(state) => {
@@ -562,7 +562,8 @@ impl App {
                 let path = match &self.mode {
                     Mode::Menu(state) => {
                         let entries = self.library.entries();
-                        state.selected_path(&entries)
+                        state
+                            .selected_path(&entries)
                             .map(|p| p.to_string_lossy().to_string())
                     }
                     _ => None,
@@ -577,7 +578,11 @@ impl App {
                         if state.selected_row > max_row {
                             state.selected_row = max_row;
                         }
-                        let max_col = if total > 0 { state.max_col(total, state.selected_row) } else { 0 };
+                        let max_col = if total > 0 {
+                            state.max_col(total, state.selected_row)
+                        } else {
+                            0
+                        };
                         if state.selected_col > max_col {
                             state.selected_col = max_col;
                         }
@@ -651,7 +656,7 @@ impl App {
                     state.cursor_word = 0;
                     state.gg_timer = None;
                 }
-            } 
+            }
 
             ReaderAction::GBottom => {
                 if let Mode::Reader(ref mut state) = &mut self.mode {
@@ -683,7 +688,7 @@ impl App {
                     }
                 }
             }
-            ReaderAction::OpenImage { .. } => {
+            ReaderAction::OpenImage => {
                 if let Mode::Reader(ref state) = &self.mode {
                     if let Some(img) = state.image_near_cursor() {
                         // For PDFs: render the page on-demand if not yet cached
@@ -693,14 +698,19 @@ impl App {
                         self.image_return_chapter = state.chapter;
                         self.image_return_word = img.word_offset + 1;
                         self.mode = Mode::ImageOverlay(ImageOverlayState::new(
-                            img.cached_path.clone(), img.width, img.height,
+                            img.cached_path.clone(),
+                            img.width,
+                            img.height,
                         ));
                         self.needs_draw = true;
                     }
                 }
                 // No image nearby — ignore
             }
-            ReaderAction::EnterRsvp { cursor_word, chapter } => {
+            ReaderAction::EnterRsvp {
+                cursor_word,
+                chapter,
+            } => {
                 if let Some(ref mut doc) = self.doc {
                     let ch_start = doc.chapter_start(chapter as u32);
                     let global_idx = ch_start as usize + cursor_word;
@@ -722,7 +732,7 @@ impl App {
             ReaderAction::ThemePrev => {
                 self.cycle_theme(-1);
             }
-            
+
             ReaderAction::BackToMenu => {
                 self.mode = Mode::Menu(MenuState::new());
                 // Clear search state
@@ -801,7 +811,12 @@ impl App {
                     if let Some(anchor) = state.selection_anchor {
                         let start = anchor.min(state.cursor_word);
                         let end = anchor.max(state.cursor_word);
-                        let text = build_selection_text(&state.wrapped_lines, &state.line_word_offsets, start, end);
+                        let text = build_selection_text(
+                            &state.wrapped_lines,
+                            &state.line_word_offsets,
+                            start,
+                            end,
+                        );
                         let word_count = end - start + 1;
 
                         // Copy to system clipboard via wl-copy (Wayland / X11)
@@ -855,7 +870,8 @@ impl App {
             RsvpAction::SeekForward10 => {
                 let idx = doc.player().current();
                 let total = doc.doc().word_count();
-                doc.player_mut().seek((idx + 10).min(total.saturating_sub(1)));
+                doc.player_mut()
+                    .seek((idx + 10).min(total.saturating_sub(1)));
             }
             RsvpAction::SeekBack100 => {
                 let idx = doc.player().current();
@@ -864,7 +880,8 @@ impl App {
             RsvpAction::SeekForward100 => {
                 let idx = doc.player().current();
                 let total = doc.doc().word_count();
-                doc.player_mut().seek((idx + 100).min(total.saturating_sub(1)));
+                doc.player_mut()
+                    .seek((idx + 100).min(total.saturating_sub(1)));
             }
             RsvpAction::SpeedUp => {
                 if let Mode::Rsvp(ref mut s) = &mut self.mode {
@@ -926,7 +943,7 @@ impl App {
                     self.needs_draw = true;
                 }
             }
-            ImageOverlayAction::None => {}
+            
         }
     }
 
@@ -1147,7 +1164,7 @@ fn kitty_config_font_size() -> f32 {
     let content = match std::fs::read_to_string(&config_path) {
         Ok(c) => c,
         Err(_) => {
-             return fallback;
+            return fallback;
         }
     };
 
@@ -1178,9 +1195,11 @@ fn zoom_terminal(app: &App, zoom_in: bool) {
         format!("{:.1}", original)
     };
 
-    drop(std::process::Command::new("kitty")
-        .args(["@", "set-font-size", &target])
-        .status());
+    drop(
+        std::process::Command::new("kitty")
+            .args(["@", "set-font-size", &target])
+            .status(),
+    );
 }
 /// Build a plain-text string from a word range spanning wrapped lines.
 /// word range is inclusive: [start_word, end_word].
@@ -1232,8 +1251,8 @@ fn build_selection_text(
 
 #[cfg(test)]
 mod tests {
-    use super::word_byte_starts;
     use super::build_selection_text;
+    use super::word_byte_starts;
 
     /// The original O(n) per-match algorithm, kept as a test oracle.
     fn oracle_offset(text: &str, abs_pos: usize) -> usize {
@@ -1299,7 +1318,11 @@ mod tests {
         let lines = vec!["    hello world".to_string()];
         let offsets = vec![0];
         let result = build_selection_text(&lines, &offsets, 0, 1);
-        assert!(!result.contains("    "), "indent not stripped: {:?}", result);
+        assert!(
+            !result.contains("    "),
+            "indent not stripped: {:?}",
+            result
+        );
     }
 
     #[test]
@@ -1354,25 +1377,23 @@ pub fn run(mut app: App) -> io::Result<()> {
         // Kitty cover images — emit once per menu view (and on resize),
         // clear once when leaving the menu.
         // Emit kitty image for image overlay
-    if app.term.can_images {
-        if let Mode::ImageOverlay(ref state) = &app.mode {
-            let size = terminal.size()?;
-            let px_per_cell = 20u32;
-            let cells_w = ((state.img_width / px_per_cell).max(1) as u16).min(size.width);
-            let cells_h = ((state.img_height / px_per_cell).max(1) as u16).min(size.height - 1);
-            let col = (size.width.saturating_sub(cells_w)) / 2;
-            let row = (size.height.saturating_sub(cells_h + 1)) / 2;
-            volta_core::cover::kitty_display_image(
-                &state.cached_path,
-                row,
-                col,
-                cells_w,
-                cells_h,
-            );
-        
+        if app.term.can_images {
+            if let Mode::ImageOverlay(ref state) = &app.mode {
+                let size = terminal.size()?;
+                let px_per_cell = 20u32;
+                let cells_w = ((state.img_width / px_per_cell).max(1) as u16).min(size.width);
+                let cells_h = ((state.img_height / px_per_cell).max(1) as u16).min(size.height - 1);
+                let col = (size.width.saturating_sub(cells_w)) / 2;
+                let row = (size.height.saturating_sub(cells_h + 1)) / 2;
+                volta_core::cover::kitty_display_image(
+                    &state.cached_path,
+                    row,
+                    col,
+                    cells_w,
+                    cells_h,
+                );
+            }
         }
-    }
-
 
         if app.term.can_images {
             if let Mode::Menu(ref state) = &app.mode {
@@ -1385,7 +1406,6 @@ pub fn run(mut app: App) -> io::Result<()> {
                     app.last_menu_scroll = state.scroll;
                 }
 
-
                 if !app.kitty_covers_shown || wh != last_kitty_size {
                     last_kitty_size = wh;
 
@@ -1395,8 +1415,8 @@ pub fn run(mut app: App) -> io::Result<()> {
                     let row_height = CARD_H + 1;
                     let visible_rows = if avail_height >= CARD_H {
                         (avail_height / row_height).max(1) as usize
-                    } else {0};
-                    
+                    } else { 0 };
+
                     let cols = (size.width.saturating_sub(2) / (CARD_W + 1)).max(1) as usize;
                     let scroll = state.scroll;
 
@@ -1404,29 +1424,30 @@ pub fn run(mut app: App) -> io::Result<()> {
                     let start_idx = scroll * cols;
                     let end_idx = ((scroll + visible_rows) * cols).min(entries.len());
 
-                    for i in start_idx..end_idx {
-                        let (_path, entry) = &entries[i];
-                        if let Some(ref cover) = entry.cover_path {
-                            let col = (i % cols) as u16;
-                            let row = (i / cols) as u16;
-                            let display_row = row - scroll as u16;
-                            let card_x = 1 + col * (CARD_W + 1);
-                            let card_y = 1 + display_row * (CARD_H + 1);
+                    for (i, (_path, entry)) in entries[start_idx..end_idx].iter().enumerate() {
+                        let abs_idx = start_idx + i;
+                        let col = (abs_idx % cols) as u16;
+                        let row = (abs_idx / cols) as u16;
+                        let display_row = row - scroll as u16;
+                        let card_x = 1 + col * (CARD_W + 1);
+                        let card_y = 1 + display_row * (CARD_H + 1);
 
+                        if let Some(ref cover) = entry.cover_path {
                             volta_core::cover::kitty_display_image(
-                                cover, card_y, card_x, 6, 4,
-                            );
+                                cover, card_y, card_x, 6, 4);
                         }
                     }
-                    app.kitty_covers_shown = true;
-                    app.last_menu_scroll = scroll;
-                }
-            } else if app.kitty_covers_shown {
-                volta_core::cover::kitty_clear_all();
-                app.kitty_covers_shown = false;
-                app.last_menu_scroll = 0;
+                
+                app.kitty_covers_shown = true;
+                app.last_menu_scroll = scroll;
             }
+            
+        } else if app.kitty_covers_shown {
+            volta_core::cover::kitty_clear_all();
+            app.kitty_covers_shown = false;
+            app.last_menu_scroll = 0;
         }
+    }
 
         if event::poll(Duration::from_millis(16))? {
             match event::read()? {

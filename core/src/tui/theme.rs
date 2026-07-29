@@ -18,9 +18,7 @@ pub struct Theme {
 }
 
 /// All 8 built-in themes, matching frontend/themes/.
-pub static THEMES: &[Theme] = &[
-    NEON, DAYLIGHT, SEPIA, NIGHT, DUSK, FOREST, OCEAN, AMBER,
-];
+pub static THEMES: &[Theme] = &[NEON, DAYLIGHT, SEPIA, NIGHT, DUSK, FOREST, OCEAN, AMBER];
 
 /// Cycle to the next (dir=1) or previous (dir=-1) theme.
 pub fn cycle_theme(current: usize, dir: i32) -> usize {

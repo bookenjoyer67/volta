@@ -156,15 +156,13 @@ impl ReaderState {
     /// Searches up to 15 words ahead and 5 words behind, returning
     /// the first image in sorted order that falls within range.
     pub fn image_near_cursor(&self) -> Option<&ChapterImage> {
-        self.chapter_images
-            .iter()
-            .find(|img| {
-                let ahead = img.word_offset >= self.cursor_word
-                    && img.word_offset <= self.cursor_word + 15;
-                let behind = img.word_offset < self.cursor_word
-                    && img.word_offset + 5 >= self.cursor_word;
-                ahead || behind
-            })
+        self.chapter_images.iter().find(|img| {
+            let ahead =
+                img.word_offset >= self.cursor_word && img.word_offset <= self.cursor_word + 15;
+            let behind =
+                img.word_offset < self.cursor_word && img.word_offset + 5 >= self.cursor_word;
+            ahead || behind
+        })
     }
 
     /// Draw the reader view.
@@ -208,12 +206,7 @@ impl ReaderState {
             area.width
         };
         let text_x = area.x + (area.width.saturating_sub(text_w)) / 2;
-        let text_area = Rect::new(
-            text_x,
-            area.y + 1,
-            text_w,
-            area.height.saturating_sub(3),
-        );
+        let text_area = Rect::new(text_x, area.y + 1, text_w, area.height.saturating_sub(3));
         let mut lines: Vec<Line> = Vec::new();
 
         let start = self.scroll;
@@ -277,9 +270,7 @@ impl ReaderState {
 
                 let style = if global_word == self.cursor_word {
                     // Cursor word — brightest
-                    Style::default()
-                        .fg(theme.cursor)
-                        .bg(Color::Rgb(60, 20, 50))
+                    Style::default().fg(theme.cursor).bg(Color::Rgb(60, 20, 50))
                 } else if match_set.contains(&global_word) {
                     // Search match
                     Style::default()
@@ -289,9 +280,7 @@ impl ReaderState {
                     let start = anchor.min(self.cursor_word);
                     let end = anchor.max(self.cursor_word);
                     if global_word >= start && global_word <= end {
-                        Style::default()
-                            .fg(theme.text)
-                            .bg(Color::Rgb(40, 50, 80))
+                        Style::default().fg(theme.text).bg(Color::Rgb(40, 50, 80))
                     } else {
                         Style::default().fg(theme.text)
                     }
@@ -371,11 +360,11 @@ impl ReaderState {
         let current_page = (self.scroll / visible.max(1)) + 1;
         let chapter_pct = {
             let total = self.line_word_offsets.last().copied().unwrap_or(0);
-        
+
             self.cursor_word
                 .checked_mul(100)
                 .and_then(|n| n.checked_div(total))
-                .unwrap_or(0)   
+                .unwrap_or(0)
         };
 
         let has_image = self.image_near_cursor().is_some();
@@ -498,17 +487,32 @@ mod tests {
         let (lines, offsets) = wrap_text(text, 30);
 
         // Every paragraph's first line starts with the 4-col indent
-        assert!(lines[0].starts_with("    alpha"), "first line: {:?}", lines[0]);
+        assert!(
+            lines[0].starts_with("    alpha"),
+            "first line: {:?}",
+            lines[0]
+        );
 
         // Find the first line of paragraph 2: "second" is word idx 8
-        let p2_line = offsets.iter().position(|&o| o == 8).expect("no line starts at word 8");
-        assert!(lines[p2_line].starts_with("    second"), "p2 line: {:?}", lines[p2_line]);
+        let p2_line = offsets
+            .iter()
+            .position(|&o| o == 8)
+            .expect("no line starts at word 8");
+        assert!(
+            lines[p2_line].starts_with("    second"),
+            "p2 line: {:?}",
+            lines[p2_line]
+        );
 
         // Continuation lines are NOT indented
         for (i, line) in lines.iter().enumerate() {
             let is_para_start = i == 0 || i == p2_line;
             if !is_para_start {
-                assert!(!line.starts_with("    "), "continuation line indented: {:?}", line);
+                assert!(
+                    !line.starts_with("    "),
+                    "continuation line indented: {:?}",
+                    line
+                );
             }
         }
 

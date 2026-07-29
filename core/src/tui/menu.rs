@@ -39,28 +39,33 @@ impl MenuState {
         }
     }
 
-    pub fn selected_path(
-        &self,
-        entries: &[(&str, &LibraryEntry)],
-    ) -> Option<PathBuf> {
+    pub fn selected_path(&self, entries: &[(&str, &LibraryEntry)]) -> Option<PathBuf> {
         let idx = self.selected_row * self.cols + self.selected_col;
         entries.get(idx).map(|(path, _)| PathBuf::from(*path))
     }
 
     /// Render the full-screen card grid.
-    pub fn render(&mut self, frame: &mut Frame, area: Rect, theme: &Theme, entries: &[(&str, &LibraryEntry)]){
-        let header_height = 1;
+    pub fn render(
+        &mut self,
+        frame: &mut Frame,
+        area: Rect,
+        theme: &Theme,
+        entries: &[(&str, &LibraryEntry)],
+    ) {
+        let header_height = 1u16;
         let footer_height = 1;
         let avail_height = area.height.saturating_sub(header_height + footer_height);
         let row_height = CARD_H + 1;
 
         let visible_rows = if avail_height >= CARD_H {
             (avail_height / row_height).max(1) as usize
-        } else {0};
+        } else {
+            0
+        };
 
         let cols = (area.width.saturating_sub(2) / (CARD_W + 1)).max(1) as usize;
         self.cols = cols;
-        let total_rows = (entries.len() + cols -1) / cols;
+        let total_rows = entries.len().div_ceil(cols);
 
         // Empty state
         if entries.is_empty() {
@@ -71,65 +76,68 @@ impl MenuState {
             return;
         }
 
-            // Clamp selection and scroll
-    if self.selected_row >= total_rows {
-        self.selected_row = total_rows.saturating_sub(1);
-    }
-    let max_col = self.max_col(entries.len(), self.selected_row);
-    if self.selected_col > max_col {
-        self.selected_col = max_col;
-    }
+        // Clamp selection and scroll
+        if self.selected_row >= total_rows {
+            self.selected_row = total_rows.saturating_sub(1);
+        }
+        let max_col = self.max_col(entries.len(), self.selected_row);
+        if self.selected_col > max_col {
+            self.selected_col = max_col;
+        }
 
-    // Adjust scroll so selected row is visible
-    if self.selected_row < self.scroll {
-        self.scroll = self.selected_row;
-    } else if self.selected_row >= self.scroll + visible_rows {
-        self.scroll = self.selected_row - visible_rows + 1;
-    }
-    if total_rows > visible_rows {
-        self.scroll = self.scroll.min(total_rows - visible_rows);
-    } else {
-        self.scroll = 0;
-    }
+        // Adjust scroll so selected row is visible
+        if self.selected_row < self.scroll {
+            self.scroll = self.selected_row;
+        } else if self.selected_row >= self.scroll + visible_rows {
+            self.scroll = self.selected_row - visible_rows + 1;
+        }
+        if total_rows > visible_rows {
+            self.scroll = self.scroll.min(total_rows - visible_rows);
+        } else {
+            self.scroll = 0;
+        }
 
-    // Render visible cards
-    let start_row = self.scroll;
-    let end_row = (self.scroll + visible_rows).min(total_rows);
-    for row in start_row..end_row {
-        for col in 0..cols {
-            let idx = row * cols + col;
-            if idx >= entries.len() {
-                continue;
+        // Render visible cards
+        let start_row = self.scroll;
+        let end_row = (self.scroll + visible_rows).min(total_rows);
+        for row in start_row..end_row {
+            for col in 0..cols {
+                let idx = row * cols + col;
+                if idx >= entries.len() {
+                    continue;
+                }
+                let (_path, entry) = entries[idx];
+                let x = area.x + 1 + col as u16 * (CARD_W + 1);
+                let y = area.y + header_height + (row - start_row) as u16 * (CARD_H + 1);
+                let card_area = Rect::new(x, y, CARD_W, CARD_H);
+                let is_selected =
+                    col == self.selected_col && row == self.selected_row;
+                self.render_card(frame, card_area, entry, is_selected, theme);
             }
-            let (_path, entry) = entries[idx];
-            let x = area.x + 1 + col as u16 * (CARD_W + 1);
-            let y = area.y + header_height as u16 + (row - start_row) as u16 * (CARD_H + 1);
-            let card_area = Rect::new(x, y, CARD_W, CARD_H);
-            let is_selected = col as usize == self.selected_col && row as usize == self.selected_row;
-            self.render_card(frame, card_area, entry, is_selected, theme);
         }
-    }
 
-    // Draw scrollbar if needed
-    if total_rows > visible_rows {
-        let bar_x = area.x + area.width - 1;
-        let bar_y = area.y + header_height as u16;
-        let bar_height = avail_height;
-        let thumb_height = ((visible_rows as f32 / total_rows as f32) * bar_height as f32) as u16;
-        let thumb_y = ((self.scroll as f32 / (total_rows - visible_rows) as f32) * (bar_height - thumb_height) as f32) as u16;
-        for y in 0..bar_height {
-            let ch = if y >= thumb_y && y < thumb_y + thumb_height {
-                '█'
-            } else {
-                '░'
-            };
-            frame.render_widget(
-                ratatui::widgets::Paragraph::new(ch.to_string()),
-                Rect::new(bar_x, bar_y + y, 1, 1),
-            );
+        // Draw scrollbar if needed
+        if total_rows > visible_rows {
+            let bar_x = area.x + area.width - 1;
+            let bar_y = area.y + header_height;
+            let bar_height = avail_height;
+            let thumb_height =
+                ((visible_rows as f32 / total_rows as f32) * bar_height as f32) as u16;
+            let thumb_y = ((self.scroll as f32 / (total_rows - visible_rows) as f32)
+                * (bar_height - thumb_height) as f32) as u16;
+            for y in 0..bar_height {
+                let ch = if y >= thumb_y && y < thumb_y + thumb_height {
+                    '█'
+                } else {
+                    '░'
+                };
+                frame.render_widget(
+                    ratatui::widgets::Paragraph::new(ch.to_string()),
+                    Rect::new(bar_x, bar_y + y, 1, 1),
+                );
+            }
         }
     }
-}
 
     /// Render a single card.
     fn render_card(
@@ -233,7 +241,6 @@ impl MenuState {
         }
         None
     }
-
 }
 fn truncate(s: &str, max_len: usize) -> String {
     if s.chars().count() <= max_len {
@@ -247,5 +254,3 @@ fn truncate(s: &str, max_len: usize) -> String {
         )
     }
 }
-
-

@@ -19,7 +19,7 @@ pub enum ReaderAction {
     GgTop,
     GBottom,
     EnterRsvp { cursor_word: usize, chapter: usize },
-    OpenImage { cursor_word: usize, chapter: usize },
+    OpenImage,
     EnterToc { chapter: usize, cursor_word: usize },
     JumpBack,
     Save,
@@ -99,8 +99,7 @@ impl ReaderAction {
             KeyCode::Char('p') => ReaderAction::PrevChapter,
 
             KeyCode::Char('j') => {
-                let scroll =
-                    (state.scroll + 3).min(state.wrapped_lines.len().saturating_sub(1));
+                let scroll = (state.scroll + 3).min(state.wrapped_lines.len().saturating_sub(1));
                 let cursor = state
                     .line_word_offsets
                     .get(scroll)
@@ -121,8 +120,7 @@ impl ReaderAction {
             // Half-page scrolling
             KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 let h = 10;
-                let scroll =
-                    (state.scroll + h).min(state.wrapped_lines.len().saturating_sub(1));
+                let scroll = (state.scroll + h).min(state.wrapped_lines.len().saturating_sub(1));
                 let cursor = state
                     .line_word_offsets
                     .get(scroll)
@@ -144,8 +142,7 @@ impl ReaderAction {
             // Full-page scrolling
             KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 let h = 20;
-                let scroll =
-                    (state.scroll + h).min(state.wrapped_lines.len().saturating_sub(1));
+                let scroll = (state.scroll + h).min(state.wrapped_lines.len().saturating_sub(1));
                 let cursor = state
                     .line_word_offsets
                     .get(scroll)
@@ -205,10 +202,7 @@ impl ReaderAction {
                 cursor_word: state.cursor_word,
                 chapter: state.chapter,
             },
-            KeyCode::Enter => ReaderAction::OpenImage {
-                cursor_word: state.cursor_word,
-                chapter: state.chapter,
-            },
+            KeyCode::Enter => ReaderAction::OpenImage,
 
             KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 ReaderAction::Save
@@ -394,7 +388,6 @@ pub enum Action {
 // ── Image overlay actions ──
 
 pub enum ImageOverlayAction {
-    None,
     Dismiss,
 }
 

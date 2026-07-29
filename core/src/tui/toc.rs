@@ -127,7 +127,10 @@ impl TocState {
             }
         );
         let title_line = Line::from(Span::styled(title, Style::default().fg(theme.heading)));
-        frame.render_widget(Paragraph::new(title_line), Rect::new(inner.x, inner.y, inner.width, 1));
+        frame.render_widget(
+            Paragraph::new(title_line),
+            Rect::new(inner.x, inner.y, inner.width, 1),
+        );
 
         // Separator
         let sep = "─".repeat(inner.width as usize);
@@ -151,7 +154,10 @@ impl TocState {
                 "(no matching chapters)",
                 Style::default().fg(Color::Gray),
             ));
-            frame.render_widget(Paragraph::new(msg), Rect::new(inner.x + 2, list_top, inner.width, 1));
+            frame.render_widget(
+                Paragraph::new(msg),
+                Rect::new(inner.x + 2, list_top, inner.width, 1),
+            );
         } else {
             for row in 0..visible {
                 let fi = self.scroll + row;
@@ -182,7 +188,12 @@ impl TocState {
                 let style = Style::default().fg(fg).bg(bg);
                 frame.render_widget(
                     Paragraph::new(Line::from(Span::styled(truncated, style))),
-                    Rect::new(inner.x + 2, list_top + row as u16, inner.width.saturating_sub(4), 1),
+                    Rect::new(
+                        inner.x + 2,
+                        list_top + row as u16,
+                        inner.width.saturating_sub(4),
+                        1,
+                    ),
                 );
             }
         }
@@ -219,7 +230,9 @@ fn truncate(s: &str, max_len: usize) -> String {
     } else {
         format!(
             "{}…",
-            s.chars().take(max_len.saturating_sub(1)).collect::<String>()
+            s.chars()
+                .take(max_len.saturating_sub(1))
+                .collect::<String>()
         )
     }
 }

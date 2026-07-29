@@ -36,7 +36,12 @@ impl ImageOverlayState {
         ));
         frame.render_widget(
             Paragraph::new(hint).alignment(Alignment::Center),
-            Rect::new(area.x, area.y + area.height.saturating_sub(1), area.width, 1),
+            Rect::new(
+                area.x,
+                area.y + area.height.saturating_sub(1),
+                area.width,
+                1,
+            ),
         );
     }
 }

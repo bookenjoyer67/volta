@@ -4,8 +4,6 @@
 //! time centered on screen, with the ORP pivot character highlighted
 //! in the theme's accent color.
 
-use volta_core::doc::Document;
-use volta_core::player::PlayerState;
 use crate::tui::theme::Theme;
 use ratatui::{
     layout::{Alignment, Rect},
@@ -14,6 +12,8 @@ use ratatui::{
     widgets::Paragraph,
     Frame,
 };
+use volta_core::doc::Document;
+use volta_core::player::PlayerState;
 
 pub struct RsvpState {
     pub wpm: u32,
@@ -69,7 +69,10 @@ impl RsvpState {
 
         // ── Progress bar ──
         let bar_width = area.width as usize;
-        let filled = total.checked_div(1).map(|_| (bar_width * (idx + 1)) / total).unwrap_or(0);
+        let filled = total
+            .checked_div(1)
+            .map(|_| (bar_width * (idx + 1)) / total)
+            .unwrap_or(0);
         let bar = "█".repeat(filled) + &"░".repeat(bar_width.saturating_sub(filled));
         let bar_line = Line::from(Span::styled(bar, Style::default().fg(theme.progress)));
         frame.render_widget(
@@ -99,10 +102,7 @@ impl RsvpState {
             ));
             let sx = area.x + area.width.saturating_sub(30) / 2;
             let sy = area.y + area.height.saturating_sub(6) / 2;
-            frame.render_widget(
-                Paragraph::new(stats_line),
-                Rect::new(sx, sy, 30, 4),
-            );
+            frame.render_widget(Paragraph::new(stats_line), Rect::new(sx, sy, 30, 4));
         }
     }
 }
