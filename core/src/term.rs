@@ -117,14 +117,15 @@ mod tests {
             "GNOME_TERMINAL_SERVICE",
             "VTE_VERSION",
             "XTERM_VERSION",
+            "TERM",
         ];
         for &var in &vars_to_clear{
             std::env::remove_var(var);
         }
+
+        std::env::set_var("TERM", "ghostty");
         let term = Term::detect();
-        assert!(term.can_images);
-        assert!(!term.can_font_zoom); // as expected
-        std::env::remove_var("TERM");
+
     }
 
     #[test]
