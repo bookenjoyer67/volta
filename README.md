@@ -9,8 +9,6 @@
   <code>⚡ Volta</code>
 </h1>
 
-<h3 align="center"><em>turn the page. turn the mind.</em></h3>
-
 <p align="center">
   Desktop ebook reader with RSVP speed reading.
   <br>
@@ -38,7 +36,7 @@
 
 ## Install
 
-### Package managers (recommended)
+### Package managers 
 
 ```bash
 # Arch Linux / CachyOS (AUR)
@@ -55,7 +53,10 @@ sudo dnf install volta
 sudo apt install ./volta_0.1.0-1_amd64.deb
 ```
 
-### Build from source
+### Build from source (recommended)
+
+I won't always have the packages updated. The source code will be more of a manual process but it will be up to date and it will work.
+Just follow the instructions listed below.
 
 #### Dependencies
 
@@ -65,12 +66,12 @@ debian:   sudo apt install love rustc cargo poppler-utils zenity
 fedora:   sudo dnf install love rust cargo poppler-utils zenity
 ```
 
-It is recommended that you use kitty as this was designed for kitty. I have not used it on any other terminal emulator yet. If you want it to work use kitty. 
+It is recommended that you use kitty if you are using the TUI. Kitty is able to support all the features. I also use kitty therefore this is going to be the most optimized for kitty. If you want it to work use kitty. 
 In your kitty.conf file:
 ```
 allow_remote_control yes
 ```
-This way the text zoom will work properly when entering and exiting RSVP mode. Otherwise you should be good to go.
+This way the automatic text zoom will work properly when entering and exiting RSVP mode.
 ### Build
 
 ```bash
