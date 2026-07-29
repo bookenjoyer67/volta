@@ -111,11 +111,20 @@ mod tests {
 
     #[test]
     fn detects_ghostty_via_term() {
-        unsafe { std::env::set_var("TERM", "ghostty") };
+        let vars_to_clear = [
+            "KITTY_WINDOW_ID",
+            "TERM_PROGRAM",
+            "GNOME_TERMINAL_SERVICE",
+            "VTE_VERSION",
+            "XTERM_VERSION",
+        ];
+        for &var in &vars_to_clear{
+            std::env::remove_var(var);
+        }
         let term = Term::detect();
         assert!(term.can_images);
         assert!(!term.can_font_zoom); // as expected
-        unsafe { std::env::remove_var("TERM") };
+        std::env::remove_var("TERM");
     }
 
     #[test]
