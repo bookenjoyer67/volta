@@ -69,6 +69,7 @@ pub struct App {
     /// Return position for image overlay dismiss.
     pub image_return_chapter: usize,
     pub image_return_word: usize,
+    pub last_menu_scroll: usize,
 }
 
 impl App {
@@ -94,6 +95,7 @@ impl App {
             image_return_chapter: 0,
             image_return_word: 0,
             term: Term::detect(),
+            last_menu_scroll: 0,
         }
     }
 
@@ -122,6 +124,7 @@ impl App {
             image_return_chapter: 0,
             image_return_word: 0,
             term: Term::detect(),
+            last_menu_scroll: 0,
         }
     }
 
@@ -388,7 +391,7 @@ impl App {
                 }
             }
             Mode::ImageOverlay(ref state) => {
-                state.render(frame, area, thm);
+                state.render(frame, area, thm, self.term.can_images);
             }
             Mode::Toc(ref mut state) => {
                 state.render(frame, area, thm);
@@ -1351,46 +1354,77 @@ pub fn run(mut app: App) -> io::Result<()> {
         // Kitty cover images — emit once per menu view (and on resize),
         // clear once when leaving the menu.
         // Emit kitty image for image overlay
-        if app.term.can_images {
-            if let Mode::ImageOverlay(ref state) = &app.mode {
-                let size = terminal.size()?;
-                let _term_w = size.width as u32;
-                let _term_h = size.height.saturating_sub(1) as u32;
-                let px_per_cell = 20u32;
-                let cells_w = ((state.img_width / px_per_cell).max(1) as u16).min(size.width);
-                let cells_h = ((state.img_height / px_per_cell).max(1) as u16).min(size.height - 1);
-                let col = (size.width.saturating_sub(cells_w)) / 2;
-                let row = (size.height.saturating_sub(cells_h + 1)) / 2;
-                volta_core::cover::kitty_display_image(
-                    &state.cached_path, row, col, cells_w, cells_h,
-                );
-            }
+    if app.term.can_images {
+        if let Mode::ImageOverlay(ref state) = &app.mode {
+            let size = terminal.size()?;
+            let px_per_cell = 20u32;
+            let cells_w = ((state.img_width / px_per_cell).max(1) as u16).min(size.width);
+            let cells_h = ((state.img_height / px_per_cell).max(1) as u16).min(size.height - 1);
+            let col = (size.width.saturating_sub(cells_w)) / 2;
+            let row = (size.height.saturating_sub(cells_h + 1)) / 2;
+            volta_core::cover::kitty_display_image(
+                &state.cached_path,
+                row,
+                col,
+                cells_w,
+                cells_h,
+            );
+        
         }
+    }
+
+
         if app.term.can_images {
-            if let Mode::Menu(_) = &app.mode {
+            if let Mode::Menu(ref state) = &app.mode {
                 let size = terminal.size()?;
                 let wh = (size.width, size.height);
+
+                if state.scroll != app.last_menu_scroll {
+                    volta_core::cover::kitty_clear_all();
+                    app.kitty_covers_shown = false;
+                    app.last_menu_scroll = state.scroll;
+                }
+
+
                 if !app.kitty_covers_shown || wh != last_kitty_size {
                     last_kitty_size = wh;
+
+                    let header_height = 1;
+                    let footer_height = 1;
+                    let avail_height = size.height.saturating_sub(header_height + footer_height);
+                    let row_height = CARD_H + 1;
+                    let visible_rows = if avail_height >= CARD_H {
+                        (avail_height / row_height).max(1) as usize
+                    } else {0};
+                    
+                    let cols = (size.width.saturating_sub(2) / (CARD_W + 1)).max(1) as usize;
+                    let scroll = state.scroll;
+
                     let entries = app.library.entries();
-                    let cols =
-                        (size.width.saturating_sub(2) / (CARD_W + 1)).max(1) as usize;
-                    for (i, (_path, entry)) in entries.iter().enumerate() {
+                    let start_idx = scroll * cols;
+                    let end_idx = ((scroll + visible_rows) * cols).min(entries.len());
+
+                    for i in start_idx..end_idx {
+                        let (_path, entry) = &entries[i];
                         if let Some(ref cover) = entry.cover_path {
                             let col = (i % cols) as u16;
                             let row = (i / cols) as u16;
+                            let display_row = row - scroll as u16;
                             let card_x = 1 + col * (CARD_W + 1);
-                            let card_y = 1 + row * (CARD_H + 1);
+                            let card_y = 1 + display_row * (CARD_H + 1);
+
                             volta_core::cover::kitty_display_image(
                                 cover, card_y, card_x, 6, 4,
                             );
                         }
                     }
                     app.kitty_covers_shown = true;
+                    app.last_menu_scroll = scroll;
                 }
             } else if app.kitty_covers_shown {
                 volta_core::cover::kitty_clear_all();
                 app.kitty_covers_shown = false;
+                app.last_menu_scroll = 0;
             }
         }
 

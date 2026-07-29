@@ -29,7 +29,7 @@ impl ImageOverlayState {
 
     /// Minimal render — just a hint bar. The actual image is emitted
     /// via kitty protocol after terminal.draw() in the run loop.
-    pub fn render(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
+    pub fn render(&self, frame: &mut Frame, area: Rect, theme: &Theme, _can_images: bool) {
         let hint = Line::from(Span::styled(
             "Press any key to return to reading",
             ratatui::style::Style::default().fg(theme.hud),
