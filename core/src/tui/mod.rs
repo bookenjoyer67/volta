@@ -35,6 +35,8 @@ use ratatui::{
 use std::io;
 use std::path::Path;
 use std::time::{Duration, Instant};
+use std::sync::atomic::{AtomicBool, Ordering};
+static KITTY_REMOTE_AVAILABLE: AtomicBool = AtomicBool::new(true);
 
 pub enum Mode {
     ImageOverlay(ImageOverlayState),
@@ -1187,6 +1189,9 @@ fn zoom_terminal(app: &App, zoom_in: bool) {
     if !app.term.can_font_zoom {
         return;
     }
+    if !KITTY_REMOTE_AVAILABLE.load(Ordering::Relaxed) {
+        return;
+    }
 
     let original = kitty_config_font_size();
     let target = if zoom_in {
@@ -1194,13 +1199,19 @@ fn zoom_terminal(app: &App, zoom_in: bool) {
     } else {
         format!("{:.1}", original)
     };
-
-    drop(
-        std::process::Command::new("kitty")
-            .args(["@", "set-font-size", &target])
-            .status(),
-    );
+    let status = std::process::Command::new("kitty")
+        .args(["@", "set-font-size", &target])
+        .status();
+    match status {
+        Ok(s) if s.success() => {
+            //Sweet
+        }
+        _ => {
+            KITTY_REMOTE_AVAILABLE.store(false, Ordering::Relaxed);
+        }
+    }
 }
+
 /// Build a plain-text string from a word range spanning wrapped lines.
 /// word range is inclusive: [start_word, end_word].
 /// Strips the 4-space paragraph indent from yanked text.
