@@ -1,6 +1,6 @@
 # Maintainer: Book-Enjoyer <catperson@catperson.online>
 pkgname=volta-reader
-pkgver=0.1.0
+pkgver=0.1.1
 pkgrel=1
 pkgdesc="Desktop ebook reader with RSVP speed reading — dual-mode TUI + LÖVE GUI"
 arch=('x86_64')
