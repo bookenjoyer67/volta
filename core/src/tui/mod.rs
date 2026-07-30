@@ -76,7 +76,8 @@ pub struct App {
 impl App {
     /// Create app in menu mode.
     pub fn new_menu() -> Self {
-        let library = Library::load();
+        let mut library = Library::load();
+        library.scan_directory();
         App {
             mode: Mode::Menu(MenuState::new()),
             doc: None,

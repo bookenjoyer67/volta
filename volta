@@ -56,7 +56,7 @@ set -- "${ARGS[@]}"
 # ── URL download ──
 if [[ "${1:-}" == http://* || "${1:-}" == https://* ]]; then
     URL="$1"
-    DEST_DIR="${VOLTA_DOWNLOAD_DIR:-$HOME/Downloads}"
+    DEST_DIR="${VOLTA_DOWNLOAD_DIR:-$HOME/volta-books}"
     mkdir -p "$DEST_DIR"
 
     FILENAME=$(basename "$URL" | sed 's/[?#].*//')

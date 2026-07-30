@@ -10,6 +10,8 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
+use crate::doc::Document;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LibraryEntry {
     pub title: String,
@@ -129,6 +131,84 @@ impl Library {
             serde_json::to_string_pretty(&json).unwrap_or_default(),
         );
     }
+    // Scan the directory for books
+    pub fn scan_directory(&mut self) -> usize {
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+        let books_dir = std::path::PathBuf::from(format!("{}/volta-books", home));
+        let _ = std::fs::create_dir_all(&books_dir);
+
+        let mut imported = 0;
+        let entries = match std::fs::read_dir(&books_dir) {
+            Ok(e) => e,
+            Err(_) => return 0,
+        };
+        
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let path_str = path.to_string_lossy().to_string();
+            if self.map.contains_key(&path_str) {
+                continue;
+            }
+            let ext = path.extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("")
+                .to_lowercase();
+
+            if !matches!(ext.as_str(), "epub" | "pdf" | "md") {
+                continue;
+            }
+            //Extract metadata
+            let (title, author, chapter_count) = match ext.as_str() {
+                "epub" => {
+                    match crate::epub::EpubDoc::open(&path) {
+                        Ok(doc) => (doc.title().to_string(), String::new(), doc.chapter_count()),
+                        Err(_) => continue,
+                    }
+                }
+                "pdf" => {
+                    match crate::pdf::PdfDoc::open(&path) {
+                        Ok(doc) => (doc.title().to_string(), String::new(), doc.chapter_count()),
+                        Err(_) => continue,
+                    }
+                }
+                "md" => {
+                    match crate::md::MdDoc::open(&path) {
+                        Ok(doc) => (doc.title().to_string(), String::new(), doc.chapter_count()),
+                        Err(_) => continue,
+                    }
+                }
+                _ => continue,
+            };
+
+            let cover_path = crate::cover::extract_cover(&path_str, &ext);
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+
+            self.upsert(&path_str, LibraryEntry {
+                title,
+                author,
+                format: ext,
+                chapter_count,
+                current_chapter: 0,
+                current_word: 0,
+                last_opened: now,
+                added: now,
+                cover_path,
+            });
+            
+            imported += 1;
+        }
+
+        if imported > 0 {
+            self.save();
+        }
+        imported
+    }
+                
+
+
 
     /// Create a library backed by a specific file (for testing).
     /// Unlike `load()`, this doesn't read from `~/.local/share/volta/`.
@@ -253,5 +333,23 @@ mod tests {
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].0, "/books/a.epub");
         assert_eq!(entries[0].1.title, "A");
+    }
+
+    #[test]
+    fn scan_directory_imports_new_files() {
+        let home = std::env::var("HOME").unwrap();
+        let books_dir = format!("{}/volta-books", home);
+        std::fs::create_dir_all(&books_dir).ok();
+
+        let test_path = format!("{}/test_scan.md", books_dir);
+        std::fs::write(&test_path, "# Test Book\n\nHello world.").ok();
+
+        let mut lib = temp_library("scan_test");
+        let count = lib.scan_directory();
+
+        // Clean up
+        std::fs::remove_file(&test_path).ok();
+
+        assert!(count >= 1, "should have imported at least the test markdown file");
     }
 }
